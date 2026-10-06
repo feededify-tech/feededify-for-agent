@@ -1,13 +1,21 @@
 ---
 name: optimized-field-prompt
-description: Write, review and fix field prompts for a Feededify optimized feed (admin → Optimized feed → Products → Edit prompts) — new custom fields and overrides of existing fields such as title, description, custom_label_N, product_highlight, color, material. USE WHEN an admin asks to create, improve, review or debug an optimized-feed field prompt, or when generated feed values look wrong. NOT FOR google_product_category (it is classified automatically, no prompt).
+description: Write, review and fix field prompts for a Feededify optimized feed (admin → Optimized feed → Products → Edit prompts) — new custom fields and overrides of existing fields such as title, description, custom_label_N, product_highlight, color, material. With the feededify-admin MCP and the admin's explicit yes, can also auto-tune: save the prompts, run the feed, measure the output and iterate (up to 3 runs). USE WHEN an admin asks to create, improve, review or debug an optimized-feed field prompt, or when generated feed values look wrong, or asks to auto-tune or test prompts on a feed. NOT FOR google_product_category (it is classified automatically, no prompt).
 ---
 
 # Optimized-field prompt
 
-Helps a Feededify admin produce field prompts they paste into the admin's **Prompt Studio**
-themselves. You never touch the admin or any API: the admin brings the feed data, you write and
-check the prompt, the admin tests and saves it in the studio.
+Helps a Feededify admin produce field prompts. Two modes:
+
+- **Manual (default):** the admin pastes the prompts into the admin's **Prompt Studio** themselves.
+  You never touch the admin or any API: the admin brings the feed data, you write and check the
+  prompt, the admin tests and saves it in the studio.
+- **Auto-tune:** only when the `feededify-admin` MCP is connected **and** the user says "yes" to the
+  plan. You save the prompts, run the feed and measure the result yourself. See
+  [Mode: auto-tune](#mode-auto-tune-needs-the-feededify-admin-mcp) below.
+
+If the user asks for auto-tune and the MCP tools (`optimized_feeds_get` and the rest) are not available,
+say so and continue in manual mode.
 
 Before drafting, read [references/prompt-contract.md](references/prompt-contract.md) (what the
 generator already does, anti-patterns) and the field's section in
@@ -85,3 +93,41 @@ feed setting either way.
 - Saving regenerates `<key>` for every product on the next run.
 - Next: Products → Edit prompts → add/edit the field → **Test draft prompts** → Save.
 ````
+
+## Mode: auto-tune (needs the feededify-admin MCP)
+
+Use it when the user names an optimized feed, the fields to tune, and wants you to save and test the
+prompts. It works on **that feed** (no copy) and changes only the fields the user named. Step-by-step
+calls, file names and the report template: [references/auto-tune.md](references/auto-tune.md).
+
+1. **Preflight, read only.** `optimized_feeds_get` (settings, current prompt map, `generated_feed_url`,
+   `source_feed_url`, `activated`, `status`) and `optimized_feeds_history` (last run cost). Estimate the
+   cost per iteration = last full-run cost × (fields to change ÷ text fields in the map), rounded up.
+   Show: feed name, product count, fields to change, their current prompts, estimate × 3.
+2. **Ask one explicit "yes"**, with the wording in the reference. It must say that this yes confirms
+   every prompt save and feed run of this session: it is the human confirmation for the MCP two-phase
+   calls (`optimized_feeds_set_prompts`, `optimized_feeds_force_update`), so you then pass their
+   `confirm_token` yourself after checking each preview. No yes → manual-mode hand-off only, nothing saved.
+3. **Baseline.** `check-feed.mjs` on the current generated feed for the agreed fields:
+   ```bash
+   node <skill-dir>/scripts/check-feed.mjs --generated <generated_feed_url> --source <source_feed_url> \
+     --fields title,size --spec <tmp>/spec.json --language <feed language>
+   ```
+   Source feed behind auth: save `optimized_feeds_products` pages to a temp JSON and pass `--products`.
+   stdout is a count table only; product rows go to `metrics.json` and `sample.md` in a temp folder.
+4. **Iterate, at most 3 times:** draft or revise the prompts → `lint.mjs --language <feed language>` →
+   **merge** into the current map with `scripts/prompt-map.mjs` → `optimized_feeds_set_prompts`
+   (preview → confirm) → `optimized_feeds_force_update` (preview → confirm), or `optimized_feeds_start`
+   if the feed is inactive → poll `optimized_feeds_history` after `node <skill-dir>/scripts/wait-run.mjs 60`
+   until a completed run newer than the save (20 min timeout) → `check-feed.mjs` → read `sample.md` and
+   judge which flags are real invented / dropped facts → stop early when no blocking issue remains.
+5. **Stop rules:** a run failed or `batches_failed > 0`; metrics worse than the previous iteration
+   (restore the best prompts with one more save, no run unless the user asks); budget spent; a save
+   would touch any field outside the agreed list (never do that).
+6. **Report** after each iteration: prompt diff summary, metrics table, cost from history. At the end:
+   final prompts, total cost, what still fails.
+
+**Merge rule.** `optimized_feeds_set_prompts` **replaces the whole map**: a saved map without an untouched
+field deletes that field's prompt. Always save `mergeMap(current, changes)`: the current map with the
+agreed fields replaced or added, every other key kept as is. A change of `null` removes a field; use it
+only when the user asked to delete that field.
