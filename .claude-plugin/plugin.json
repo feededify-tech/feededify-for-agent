@@ -1,0 +1,9 @@
+{
+  "name": "feededify",
+  "description": "Agent skills for Feededify admins: write, review and lint optimized-feed field prompts for Prompt Studio.",
+  "author": { "name": "Feededify" },
+  "homepage": "https://github.com/feededify-tech/feededify-skills",
+  "repository": "https://github.com/feededify-tech/feededify-skills",
+  "license": "MIT",
+  "keywords": ["feededify", "product-feed", "google-shopping", "prompts"]
+}

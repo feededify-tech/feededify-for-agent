@@ -1,0 +1,14 @@
+{
+  "name": "feededify-skills",
+  "owner": { "name": "Feededify" },
+  "metadata": {
+    "description": "Feededify agent skills for admins."
+  },
+  "plugins": [
+    {
+      "name": "feededify",
+      "source": "./",
+      "description": "Write, review and lint optimized-feed field prompts for Prompt Studio."
+    }
+  ]
+}

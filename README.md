@@ -2,7 +2,7 @@
 
 Agent skills for Feededify admins. Each folder in `skills/` is a self-contained
 [Agent Skill](https://docs.claude.com/en/docs/agents-and-tools/agent-skills/overview) (`SKILL.md` +
-references + optional scripts) that works in Claude Code, Codex and claude.ai.
+references + optional scripts) that works in Claude Code, Codex and claude.ai. In Claude Code the repo installs as the plugin `feededify`.
 
 | Skill | What it does |
 |---|---|
@@ -10,31 +10,33 @@ references + optional scripts) that works in Claude Code, Codex and claude.ai.
 
 ## Install
 
-Clone once, then link (or copy) the skill folder where your agent looks for skills.
+### Claude Code (recommended)
 
-```bash
-git clone https://github.com/feededify-tech/feededify-skills.git
+Run these two commands inside Claude Code:
+
+```text
+/plugin marketplace add feededify-tech/feededify-skills
+/plugin install feededify@feededify-skills
 ```
+
+Restart Claude Code. The skill appears as `feededify:optimized-field-prompt`; new skills added to this
+repo arrive with plugin updates. To get updates automatically: `/plugin` → **Marketplaces** →
+`feededify-skills` → **Enable auto-update**. Manual update: `/plugin marketplace update feededify-skills`.
+
+### Codex and other agents
+
+Copy (or link) `skills/optimized-field-prompt` into your agent's skills folder:
 
 | Agent | Skills folder |
 |---|---|
-| Claude Code | `~/.claude/skills/` |
-| Codex | `~/.agents/skills/` (older Codex versions: `~/.codex/skills/`) |
-| claude.ai | Settings → Capabilities → Skills → upload a zip of the skill folder |
+| Codex | `~/.agents/skills/` (older versions: `~/.codex/skills/`) |
+| Claude Code without the plugin | `~/.claude/skills/` |
 
-macOS / Linux:
+Get the folder with **Code → Download ZIP** on GitHub, or `git clone https://github.com/feededify-tech/feededify-skills.git`.
 
-```bash
-ln -s "$PWD/feededify-skills/skills/optimized-field-prompt" ~/.claude/skills/optimized-field-prompt
-```
+### claude.ai
 
-Windows (PowerShell, no admin rights needed):
-
-```powershell
-New-Item -ItemType Junction -Path "$HOME\.claude\skills\optimized-field-prompt" -Target "$PWD\feededify-skills\skills\optimized-field-prompt"
-```
-
-Update later with `git pull` in the clone; linked skills update with it.
+Zip the `skills/optimized-field-prompt` folder and upload it in Settings → Customize → Skills.
 
 ## Use
 
