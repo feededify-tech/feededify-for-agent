@@ -1,6 +1,6 @@
 ---
 name: optimized-field-prompt
-description: Write, review and fix field prompts for a Feededify optimized feed (admin → Optimized feed → Products → Edit prompts) — new custom fields and overrides of existing fields such as title, description, custom_label_N, product_highlight, color, material. With the feededify-admin MCP and the admin's explicit yes, can also auto-tune: save the prompts, run the feed, measure the output and iterate (up to 3 runs). USE WHEN an admin asks to create, improve, review or debug an optimized-feed field prompt, or when generated feed values look wrong, or asks to auto-tune or test prompts on a feed. NOT FOR google_product_category (it is classified automatically, no prompt).
+description: Write, review and fix field prompts for a Feededify optimized feed (admin → Optimized feed → Products → Edit prompts) — new custom fields and overrides of existing fields such as title, description, custom_label_N, product_highlight, color, material. With the feededify-admin MCP and the admin's explicit yes, can also auto-tune: save the prompts, run the feed, measure the output and iterate (up to 3 runs). USE WHEN an admin asks to create, improve, review or debug an optimized-feed field prompt, or when generated feed values look wrong, or asks to auto-tune or test prompts on a feed. NOT FOR google_product_category (it is classified automatically, no prompt), or for auditing a whole feed to decide which fields to optimize (use feed-prompt-audit).
 ---
 
 # Optimized-field prompt

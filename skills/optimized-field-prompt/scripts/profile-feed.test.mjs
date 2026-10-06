@@ -8,7 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseXml } from './feed.mjs';
 import {
-  profileRecords, renderSample, langClass, unitFamilies, otherProducts, titleThickness, textThickness,
+  profileRecords, renderSample, renderSummary, langClass, unitFamilies, otherProducts, titleThickness, textThickness,
   dimTuples, titleStem, separatorsIn, titleShapes,
 } from './profile-feed.mjs';
 
@@ -28,6 +28,22 @@ describe('language mix', () => {
     assert.equal(langClass('Лист сталь 2 мм'), 'cyrillic');
     assert.equal(langClass('Steel sheet 2 mm'), 'latin');
     assert.equal(langClass('  '), 'empty');
+  });
+  test('Russian without ы э ё ъ is detected from Russian-only endings and words', () => {
+    assert.equal(langClass('Труба профильная 20х20'), 'ru');
+    assert.equal(langClass('Лист стальной оцинкованный'), 'ru'); // marker letter anyway
+    assert.equal(langClass('Сетка рабочая и защитная для забора'), 'ru');
+    assert.equal(langClass('Профиль монтажный, длина 3 м и ширина 40 мм, из стали без покрытия с отверстиями по всей длине'), 'ru');
+    assert.equal(langClass('Труба профільна 20х20'), 'uk');
+    assert.equal(langClass('Лист оцинкований 0,5 мм 1000x2000'), 'cyrillic');
+    assert.equal(langClass('Гайка М10'), 'cyrillic');
+  });
+  test('a long text with a single Russian-looking ending stays unmarked', () => {
+    assert.equal(langClass('Лист оцинкований для даху та фасаду, товщина 0,5 мм, формат 1000 на 2000 мм, сталь марки DX51D з цинком Z140, зграя'), 'cyrillic');
+  });
+  test('unmarked cyrillic share per column', () => {
+    const p = prof([{ f: { title: 'Лист сталь' } }, { f: { title: 'Лист сталь 2' } }, { f: { title: 'Труба профільна' } }, { f: { title: '' } }]);
+    assert.equal(p.signals.language.unmarked_share.title, 0.667);
   });
   test('counts per column and ru rows for a uk feed', () => {
     const p = prof([
@@ -127,6 +143,11 @@ describe('other products sections', () => {
   test('plain description has no marker', () => {
     assert.equal(otherProducts('Лист оцинкований товщиною 1 мм. Переваги: міцність.'), null);
     assert.equal(otherProducts('Доставка по Україні. Також доступний самовивіз зі складу.'), null);
+    assert.equal(otherProducts('Опис. Інші переваги: міцність.'), null);
+    assert.equal(otherProducts('Опис. Інша інформація: доставка 2 дні.'), null);
+    assert.equal(otherProducts('Опис. Інші характеристики: вага 2 кг.'), null);
+    assert.equal(otherProducts('Опис. Також є в наявності на складі.'), null);
+    assert.equal(otherProducts('Опис. Є також доставка Новою поштою.'), null);
     assert.ok(otherProducts('Також доступні інші розміри: 2 мм.').patterns.includes('also_available'));
   });
   test('counts rows, patterns and sections with numbers', () => {
@@ -145,6 +166,17 @@ describe('title ↔ description number conflicts', () => {
     assert.equal(titleThickness('Пластина 25×159 (товщина 1,1 мм)'), '1.1');
     assert.equal(titleThickness('Куточок 20×1.8 мм, довжина 77 мм'), null);
     assert.equal(titleThickness('Кабель 6 мм² 100 метрів'), null);
+  });
+  test('titleThickness: a lone mm value counts only if labelled, or ≤10 mm next to another dimension', () => {
+    assert.equal(titleThickness('Цвях будівельний 100 мм'), null);
+    assert.equal(titleThickness('Шайба 3 мм'), null);
+    assert.equal(titleThickness('Рулон оцинкований 1,4 мм 1000 мм'), '1.4');
+    assert.equal(titleThickness('Штаба t=4 мм'), '4');
+    assert.equal(titleThickness('Смуга товщ. 3 мм'), '3');
+  });
+  test('a nail length is not a thickness conflict', () => {
+    const c = prof([{ f: { title: 'Цвях будівельний 100 мм', description: 'Товщина 3 мм, довжина 100 мм.' } }]).signals.conflicts;
+    assert.equal(c.rows, 0);
   });
   test('textThickness reads labelled thickness only', () => {
     assert.deepEqual(textThickness('Лист товщиною 1,5 мм, ширина 1000 мм. Thickness: 0.9 mm'), ['1.5', '0.9']);
@@ -239,6 +271,13 @@ describe('other signals', () => {
   });
 });
 
+describe('summary', () => {
+  test('separator line names the column it counts', () => {
+    const p = profileRecords(recs([{ f: { name: 'Лист 1000x2000' } }]), { columns: ['name'] }).profile;
+    assert.match(renderSummary(p), /dimension separators in name: × 0, latin x 1/);
+  });
+});
+
 describe('sample', () => {
   test('2 rows per product_type, ≤30 rows, descriptions cut to 600 chars', () => {
     const rows = [];
@@ -266,7 +305,7 @@ describe('sample', () => {
     const r = recs([
       { id: 'plain', f: { title: 'Лист 1 мм', product_type: 'A' } },
       { id: 'plain2', f: { title: 'Лист 2 мм', product_type: 'A' } },
-      { id: 'flagged', f: { title: 'Лист 1,4 мм', description: 'Товщина 1,5 мм. Є також інші.', product_type: 'A' } },
+      { id: 'flagged', f: { title: 'Лист 1,4 мм 1000x2000', description: 'Товщина 1,5 мм. Є також інші.', product_type: 'A' } },
     ]);
     const { profile, flags } = profileRecords(r, { columns: ['title', 'description', 'product_type'] });
     const md = renderSample(r, profile, flags, ['title', 'description', 'product_type']);

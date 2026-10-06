@@ -14,23 +14,23 @@ generic products, never rows from the feed.
 |---|---|---|
 | `columns.<c>.fill_rate` < 1 | Some rows have no value | Missing-data line names the fallback column, or `""`. A field whose main column is mostly empty is a weak candidate: say so. |
 | `columns.<c>.len.p95` | Typical upper length | Sets the limit. `title` p95 under ~40 chars: the title is thin, an override that adds type and attributes has value. `description` p50 under ~100: little material for highlights or details. |
-| `all_columns` has columns not in `source_attribute_names` | Data the model does not see | Recommend adding them to Source attributes first (e.g. `material`, `color`, `size` columns). |
+| `all_columns` has columns not in `source_attribute_names` | Data the model does not see | Recommend adding them to Source attributes first (e.g. `material`, `color`, `size` columns). Only with a profile of the source feed itself: on the `--products` path `all_columns` holds just the attributes already selected, so this cannot fire. |
 | `constant_columns` | One value in every row | That column carries no product information. Never use it as a fact source. |
 
 ## Brand
 
 | Signal | Meaning | Prompt consequence |
 |---|---|---|
-| `brand.constant: true` (≥95% one value) | The store or the maker of the whole catalog, not a per-product brand | `title`: do not lead with it ("never start with the store name"); if the shop is the manufacturer, at most at the end. `brand` override: only when the admin confirms the real brand appears in title/description; otherwise leave `brand` alone. |
+| `brand.constant: true` (≥95% one value) | One name for the whole catalog: either the store or a shop that makes everything it sells | **Ask the admin whether this is the store or the real maker** before any rule. Store: `title` never starts with it, and a `brand` override only when real brands appear in title/description. Real maker: the value is correct; `title` may keep it, at the end. |
 | `brand.distinct` high, `top_share` low | Real per-product brands | Normal recipes apply. |
 
 ## Language
 
 | Signal | Meaning | Prompt consequence |
 |---|---|---|
-| `language.ru_rows` > 0 with feed language `uk` | Russian source text (ы э ё ъ) | Every text field: "Write in Ukrainian, translating the source text." Naming the feed language here is correct; `lint --language uk` does not warn about it. The stage test without this line left 3–4 of 6 titles in Russian. |
+| `language.ru_rows` > 0 with feed language `uk` | Russian source text (ы э ё ъ, or Russian-only endings / words such as "профильная", "и", "из") | Every text field: "Write in Ukrainian, translating the source text." Naming the feed language here is correct; `lint --language uk` does not warn about it. The stage test without this line left 3–4 of 6 titles in Russian. |
 | `columns.<c>.latin` dominant, feed language not English | Source in another language | Same rule with that pair of languages. |
-| `cyrillic` (no marker letters) | Short text that is neither clearly uk nor ru | Nothing to do on its own. |
+| `language.unmarked_share.<c>` high (over ~30%) | Many values are Cyrillic with no uk/ru marker; short Russian titles can hide here | Read the titles in `sample.md`. If any are Russian, add the translate line above even when `ru_rows` is 0. |
 
 ## Description content
 
@@ -52,7 +52,7 @@ generic products, never rows from the feed.
 | `single_with_unit` | Thickness / length on its own ("0,5 мм") | Keep it; it is often the variant key. |
 | `kit` | "пара", "комплект", "N шт" | `size`: use the main item's size; `title`: keep the kit word. |
 | `mixed_units.rows` | Several length units in one title ("20 мм, товщина 0,6 мм, довжина 5 м") | "Write each dimension with its own unit, e.g. 20×0,6 мм, 5 м. Never put one unit on numbers that had different units." The stage test collapsed this to "20×5 м". |
-| `conflicts.rows` (`thickness`, `dimensions`) | The title and the description's own text give different numbers | Title wins (source-of-truth line). Show the admin the example ids: these are source-data errors worth fixing in the shop. For a `size` field, add a one-line test example where the description disagrees. |
+| `conflicts.rows` (`thickness`, `dimensions`) | **Possible** source-data conflicts: the title and the description's own text seem to give different numbers. Heuristic: units, packaging and lengths vs thicknesses are not normalised | Confirm on the example ids in `sample.md` / `profile.json` before telling the admin. Confirmed ones are source-data errors worth fixing in the shop; the prompt's source-of-truth line (title wins) covers them. For a `size` field, add a test example where the description disagrees. |
 
 ## Codes and case
 

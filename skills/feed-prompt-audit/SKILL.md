@@ -1,6 +1,6 @@
 ---
 name: feed-prompt-audit
-description: Audit a Feededify optimized feed from its source products and recommend which fields to optimize, with feed-specific risks and draft field prompts. Profiles the source feed (fill, language mix, constant brand, other-products sections in descriptions, dimension notation, mixed units, title/description conflicts, product_type distribution, variant groups), lints the existing prompts, and proposes prompts plus a product_type → label table for classifier fields. Works with the feededify-admin MCP or with a source URL from the admin. USE WHEN an admin asks to audit or analyze an optimized feed, which fields to optimize or add, what is wrong with a feed's prompts, or to propose prompts from the feed's products. NOT FOR saving prompts or running the feed (that is optimized-field-prompt auto-tune), or for writing a single prompt the admin already specified (use optimized-field-prompt).
+description: Audit a Feededify optimized feed from its source products and recommend which fields to optimize, with feed-specific risks and draft field prompts. Profiles the source feed (fill, language mix, constant brand, other-products sections in descriptions, dimension notation, mixed units, possible title/description conflicts, product_type distribution, variant groups), lints the existing prompts, and proposes prompts plus a product_type → label table for classifier fields. Works with the feededify-admin MCP or with a source URL from the admin. USE WHEN an admin asks to audit or analyze an optimized feed, which fields to optimize or add, what is wrong with a feed's prompts, or to propose prompts from the feed's products. NOT FOR saving prompts or running the feed (that is optimized-field-prompt auto-tune), or for writing a single prompt the admin already specified (use optimized-field-prompt).
 ---
 
 # Feed prompt audit
@@ -43,7 +43,9 @@ node <dir>/../optimized-field-prompt/scripts/profile-feed.mjs <source_feed_url> 
 **Source needs auth** (`requires_auth: true`, or the download fails with 401/403): with the MCP, page
 `optimized_feeds_products {optimized_feed_id, skip, count: 1000}` (up to ~3 000 rows is enough), write the
 responses as a JSON array to a temp file and run `profile-feed.mjs --products <file> --columns ...`.
-Without the MCP, ask the admin for an export file.
+Without the MCP, ask the admin for an export file. On this path the rows hold only the attributes
+already selected, so the profile cannot show columns the feed has but the model does not see: skip the
+"add a column to Source attributes" check, or ask the admin which other columns the source has.
 
 Outputs go to a temp folder (`<os temp>/feededify-profile-feed/<timestamp>/`):
 - stdout: counts only. Safe to quote in chat.
@@ -53,6 +55,13 @@ Outputs go to a temp folder (`<os temp>/feededify-profile-feed/<timestamp>/`):
   into a repository.
 
 The script handles large feeds (one pass; 17k items in seconds). Never read the whole feed into the chat.
+
+Signals are heuristics. Before reporting them, check on `sample.md`:
+- **Language:** when `ru_rows` > 0, or `unmarked_share` of a text column is high (over ~30%), read the
+  sample titles; if any are Russian (or another language than the feed), recommend the translate line.
+- **Conflicts:** `conflicts` counts **possible** source-data conflicts. Confirm them on the example ids
+  before telling the admin; units, packaging and lengths are not normalised.
+- **Constant brand:** ask the admin whether the value is the store or the real maker of everything sold.
 
 ## 3. Lint the existing prompts
 
@@ -100,11 +109,11 @@ names or domains.
 |---|---|
 | Products | <rows> (<source format>, language <language>) |
 | Columns used | <source attributes, fill %> |
-| Brand | <"constant: store/maker name, not a product brand" or "N distinct"> |
-| Language of the source | <uk N, ru N, ...> |
+| Brand | <"constant (one name for the catalog): store or real maker? <admin's answer>" or "N distinct"> |
+| Language of the source | <uk N, ru N, unmarked N%; what the sample titles showed> |
 | Other-products sections | <N rows, M name sizes> |
 | Sizes | <separators used; shapes: threads N, tuples N, mixed units N> |
-| Title/description conflicts | <N (thickness N, dimensions N)>; example ids: … |
+| Possible title/description conflicts | <N flagged, M confirmed on sample rows>; example ids: … |
 | Categories | <N product_type values, breadcrumbs "<sep>"> |
 | Variant groups | <N groups, largest N> |
 | Existing prompts | <fields; lint result; gaps found> |

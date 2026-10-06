@@ -16,8 +16,9 @@
 // --out: default <os temp>/feededify-profile-feed/<timestamp>. Never point it into a git-tracked folder.
 //
 // Signals (profile.json → signals; every example list holds ids only, at most 5):
-//   language          per column: uk / ru / mixed / cyrillic (no marker letters) / latin / empty rows;
-//                     ru_rows = rows with ы э ё ъ in any profiled column
+//   language          per column: uk / ru / mixed / cyrillic (no marker) / latin / empty rows. ru = ы э ё ъ, or
+//                     (without і ї є ґ) Russian-only endings/words (-ая -ое -ой, и, из, от…): 2 hits, or 1 in
+//                     a value of ≤8 words. unmarked_share = cyrillic / filled; ru_rows = rows with ru in any column
 //   brand             brand column constant (≥95% one value): a store or maker name, not a product brand
 //   constant_columns  profiled columns with one value in every row
 //   other_products    description sections about other products ("Інший прокат…:", "Є також", "також може
@@ -30,8 +31,10 @@
 //                     rows mixing them; title value shapes: thread, dims_with_unit, dims_no_unit,
 //                     single_with_unit, kit
 //   mixed_units       titles with two or more length units (мм and м: "20 мм, товщина 0,6 мм, довжина 5 м")
-//   conflicts         title vs the description's own text (before any other-products section): labelled
-//                     thickness differs, or no dimension tuple agrees (20×1.8 vs 73×18×2). Heuristic
+//   conflicts         POSSIBLE conflicts, title vs the description's own text (before any other-products
+//                     section): labelled thickness differs (title thickness = labelled, or the only ≤10 mm value
+//                     next to another dimension), or no dimension tuple agrees (20×1.8 vs 73×18×2). Heuristic:
+//                     units and packaging are not normalised; confirm on sample rows
 //   product_type      breadcrumb separator, common prefix, depth, every value with its leaf and count
 //   variant_groups    titles with the same stem once numbers, units and colors are removed
 //
@@ -60,6 +63,14 @@ const UK = /[іїєґІЇЄҐ]/;
 const RU = /[ыэёъЫЭЁЪ]/;
 const CYR = /[Ѐ-ӿ]/;
 const LAT = /[A-Za-z]/;
+// Russian without ы э ё ъ: adjective endings Ukrainian does not use (-ая -яя -ое -ее -ой) and
+// Russian-only function words. Counted only when the value has no Ukrainian letters (і ї є ґ).
+const RU_SOFT = /(?<!\p{L})(?:\p{L}{2,}(?:ая|яя|ое|ее|ой)|и|или|из|от|что|чтобы|также|если|нет|его|под)(?!\p{L})/giu;
+const WORDS = /\p{L}+/gu;
+/** Number of Russian-only endings / words in s (no Ukrainian-letter check). */
+export function ruSoftHits(s) { return (String(s ?? '').match(RU_SOFT) ?? []).length; }
+/** uk / ru / mixed / cyrillic (no marker) / latin / empty. ru without marker letters needs 2 soft hits,
+ *  or 1 in a short value (≤8 words, a title). */
 export function langClass(s) {
   s = String(s ?? '');
   if (!s.trim()) return 'empty';
@@ -67,7 +78,11 @@ export function langClass(s) {
   if (uk && ru) return 'mixed';
   if (uk) return 'uk';
   if (ru) return 'ru';
-  if (CYR.test(s)) return 'cyrillic';
+  if (CYR.test(s)) {
+    const hits = ruSoftHits(s);
+    if (hits >= 2 || (hits === 1 && (s.match(WORDS) ?? []).length <= 8)) return 'ru';
+    return 'cyrillic';
+  }
   return LAT.test(s) ? 'latin' : 'empty';
 }
 
@@ -139,7 +154,7 @@ export function titleShapes(s) {
 }
 
 // ---------- thickness ----------
-const THICK_RE = new RegExp(`(?:товщин\\p{L}*|толщин\\p{L}*|thickness)(?:\\s+\\p{L}+)?\\s*(?:[:\\-–—=]\\s*)?(?:до\\s+|up to\\s+)?(${NUM})\\s*(?:мм|mm)(?![\\p{L}²³])`, 'giu');
+const THICK_RE = new RegExp(`(?:товщин\\p{L}*|товщ\\.|толщин\\p{L}*|толщ\\.|thickness|(?<!\\p{L})t(?=\\s*=))(?:\\s+\\p{L}+)?\\s*(?:[:\\-–—=]\\s*)?(?:до\\s+|up to\\s+)?(${NUM})\\s*(?:мм|mm)(?![\\p{L}²³])`, 'giu');
 const NOT_THICK = /(?:довжин|ширин|висот|глибин|діаметр|длин|высот|диаметр|length|width|height|depth|diameter|ø)\p{L}*\s*[:\-–—=]?\s*$/iu;
 /** Labelled thickness values in s ("товщиною 1,5 мм", "Thickness: 0.9 mm"), normalised. */
 export function textThickness(s) { return [...String(s ?? '').matchAll(THICK_RE)].map((m) => normNum(m[1])); }
@@ -148,20 +163,27 @@ export function titleThickness(s) {
   s = String(s ?? '');
   const lab = textThickness(s);
   if (lab.length) return lab[0];
-  const rest = mask(s, [...[...s.matchAll(THREAD_RE)].map((m) => [m.index, m.index + m[0].length]), ...tupleMatches(s).map((t) => [t.index, t.end])]);
-  const vals = [];
-  for (const m of rest.matchAll(SINGLE_RE)) {
+  const tuples = tupleMatches(s);
+  const rest = mask(s, [...[...s.matchAll(THREAD_RE)].map((m) => [m.index, m.index + m[0].length]), ...tuples.map((t) => [t.index, t.end])]);
+  const singles = [...rest.matchAll(SINGLE_RE)];
+  const cand = [];
+  for (const m of singles) {
     if (!/^(мм|mm)$/i.test(m[2])) continue;
     if (NOT_THICK.test(rest.slice(Math.max(0, m.index - 30), m.index))) continue;
-    vals.push(normNum(m[1]));
+    if (Number(normNum(m[1])) <= MAX_THICK_MM) cand.push(normNum(m[1]));
   }
-  return vals.length === 1 ? vals[0] : null;
+  // An unlabelled value is a thickness only when the title also gives another dimension (1,4 мм 1000x2000);
+  // a lone "100 мм" is a length, a lone "3 мм" could be anything.
+  const otherDims = tuples.length + singles.length - 1 > 0;
+  return cand.length === 1 && otherDims ? cand[0] : null;
 }
+const MAX_THICK_MM = 10;
 
 // ---------- other-products sections ----------
 const OTHER = {
-  other_colon: /(?<!\p{L})Інш(?:ий|і|а|е|их)\s[^:\n]{0,80}:/iu,
-  also_available: /(?<!\p{L})(?:є також|також є|також доступн\p{L}*\s+(?:інш|модел|варіант|розмір|товар|позиці|вид)\p{L}*|also available)(?!\p{L})/iu,
+  // "Інші переваги:", "Інша інформація:" are about this product, not other products.
+  other_colon: /(?<!\p{L})Інш(?:ий|і|а|е|их)\s(?!(?:переваг|інформац|характеристик|умов|дан|особливост|питан|властивост|детал|відомост|способ|послуг)\p{L}*)[^:\n]{0,80}:/iu,
+  also_available: /(?<!\p{L})(?:(?:є також|також є)(?!\s+(?:(?:в|у)\s+наявн|доставк|самовивіз|можлив|знижк|гаранті|оплат))|також доступн\p{L}*\s+(?:інш|модел|варіант|розмір|товар|позиці|вид)\p{L}*|also available)(?!\p{L})/iu,
   may_interest: /(?<!\p{L})(?:може|можуть|may)\s+(?:вас\s+)?(?:також\s+)?(?:зацікавити|interest you)|you may also like|также может заинтересовать/iu,
   bought_together: /(?<!\p{L})(?:що ще|що також|разом з цим товаром|с этим товаром)\s+(?:купують|покупают)|купують разом/iu,
   related: /(?<!\p{L})(?:супутні|схожі|рекомендовані|другие|похожие) товари?|рекомендуємо також|дивіться також/iu,
@@ -380,7 +402,12 @@ export function profileRecords(records, { columns, language, cols = {} } = {}) {
     all_columns: allCols,
     columns: columnsOut,
     signals: {
-      language: { feed_language: language ?? null, columns: lang, ru_rows: sig.ru.rows, examples: sig.ru.ex },
+      language: {
+        feed_language: language ?? null, columns: lang,
+        // share of filled values that are Cyrillic with no uk/ru marker: read sample titles to decide
+        unmarked_share: Object.fromEntries(columns.map((c) => [c, colStat[c].filled ? round3(lang[c].cyrillic / colStat[c].filled) : 0])),
+        ru_rows: sig.ru.rows, examples: sig.ru.ex,
+      },
       brand,
       constant_columns: constant,
       other_products: { column: role.description, rows: sig.other.rows, by_pattern: sig.other.by, with_numbers: sig.other.withNum, examples: sig.other.ex },
@@ -449,20 +476,21 @@ export function renderSummary(p) {
   L.push(`rows: ${p.rows}`);
   L.push(`fill: ${p.columns_profiled.map((c) => `${c} ${Math.round(p.columns[c].fill_rate * 100)}%`).join(', ')}`);
   for (const [c, l] of Object.entries(s.language.columns)) {
-    if (p.columns[c].filled) L.push(`language ${c}: uk ${l.uk}, ru ${l.ru}, mixed ${l.mixed}, cyrillic unmarked ${l.cyrillic}, latin ${l.latin}`);
+    if (p.columns[c].filled) L.push(`language ${c}: uk ${l.uk}, ru ${l.ru}, mixed ${l.mixed}, cyrillic unmarked ${l.cyrillic} (${Math.round(s.language.unmarked_share[c] * 100)}%), latin ${l.latin}`);
   }
-  if (s.language.ru_rows) L.push(`rows with Russian letters (ы э ё ъ): ${s.language.ru_rows}${s.language.feed_language ? ` (feed language ${s.language.feed_language})` : ''}`);
-  if (s.brand) L.push(s.brand.constant ? `brand: constant across ${s.brand.filled} rows (a store or maker name, not a per-product brand)` : `brand: ${s.brand.distinct} distinct values, top share ${Math.round(s.brand.top_share * 100)}%`);
+  if (s.language.ru_rows) L.push(`rows with Russian text: ${s.language.ru_rows}${s.language.feed_language ? ` (feed language ${s.language.feed_language})` : ''}`);
+  if (s.brand) L.push(s.brand.constant ? `brand: constant across ${s.brand.filled} rows (one name for the whole catalog: ask the admin whether it is the store or the real maker)` : `brand: ${s.brand.distinct} distinct values, top share ${Math.round(s.brand.top_share * 100)}%`);
   if (s.constant_columns.length) L.push(`constant columns: ${s.constant_columns.join(', ')}`);
   L.push(`other-products sections in ${s.other_products.column}: ${s.other_products.rows} rows (${s.other_products.with_numbers} name sizes)`);
   L.push(`html tags: ${Object.entries(s.html).map(([c, n]) => `${c} ${n}`).join(', ')}`);
   L.push(`leftover entities (&nbsp; &gt; ...): ${Object.entries(s.entities).map(([c, n]) => `${c} ${n}`).join(', ')}`);
   L.push(`minimum-order phrases: ${s.min_order.rows}; approximate values: ${s.approx_values.rows}`);
-  const t = s.dimensions[p.columns_profiled.includes(s.mixed_units.column) ? s.mixed_units.column : p.columns_profiled[0]];
-  if (t) L.push(`dimension separators in ${s.mixed_units.column}: × ${t.separators['×']}, latin x ${t.separators.x}, cyrillic х ${t.separators['х']} rows; mixed in one value ${t.mixed_separator_rows}; kinds in feed ${s.dimensions.feed_separators}`);
+  const dc = p.columns_profiled.includes(s.mixed_units.column) ? s.mixed_units.column : p.columns_profiled[0];
+  const t = s.dimensions[dc];
+  if (t) L.push(`dimension separators in ${dc}: × ${t.separators['×']}, latin x ${t.separators.x}, cyrillic х ${t.separators['х']} rows; mixed in one value ${t.mixed_separator_rows}; kinds in feed ${s.dimensions.feed_separators}`);
   L.push(`title shapes: ${Object.entries(s.dimensions.title_shapes).map(([k, n]) => `${k} ${n}`).join(', ')}`);
   L.push(`mixed length units in one title: ${s.mixed_units.rows}`);
-  L.push(`title/description number conflicts: ${s.conflicts.rows} rows (thickness ${s.conflicts.thickness}, dimensions ${s.conflicts.dimensions})`);
+  L.push(`possible title/description number conflicts (confirm on sample rows): ${s.conflicts.rows} rows (thickness ${s.conflicts.thickness}, dimensions ${s.conflicts.dimensions})`);
   if (s.product_type) L.push(`product_type: ${s.product_type.distinct} values, empty ${s.product_type.empty_rows}, breadcrumb "${s.product_type.separator ?? '-'}" in ${s.product_type.breadcrumb_rows} rows, common prefix ${s.product_type.common_prefix.length} levels`);
   L.push(`variant groups (same title stem): ${s.variant_groups.groups} groups, ${s.variant_groups.rows} rows, largest ${s.variant_groups.largest}`);
   return L.join('\n');
