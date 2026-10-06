@@ -51,7 +51,8 @@ const EXPECTED = {
   product_highlight: { bad_list: 1, russian_letters: 1 },
 };
 
-const run = () => checkFeeds(parseXml(GENERATED), parseXml(SOURCE), { fields: FIELDS, spec: SPEC, language: 'uk' });
+const EXPECT_CHECKS = ['wrong_label', 'unmapped_label'];
+const run = () =>checkFeeds(parseXml(GENERATED), parseXml(SOURCE), { fields: FIELDS, spec: SPEC, language: 'uk' });
 
 describe('token helpers', () => {
   test('numberTokens normalises comma/dot and trailing zeros', () => {
@@ -115,7 +116,8 @@ describe('checkFeeds', () => {
       }
     }
     const totals = Object.fromEntries(CHECKS.map((c) => [c, FIELDS.reduce((s, f) => s + (metrics.fields[f].checks[c] ?? 0), 0)]));
-    for (const c of CHECKS) assert.equal(totals[c], 1, `check ${c} total`);
+    // wrong_label / unmapped_label need spec.expect; covered in their own describe block below.
+    for (const c of CHECKS.filter((x) => !EXPECT_CHECKS.includes(x))) assert.equal(totals[c], 1, `check ${c} total`);
   });
   test('rows, filled and fill_rate; join by id; unmatched counted', () => {
     const { metrics } = run();
@@ -157,6 +159,52 @@ describe('checkFeeds', () => {
   });
 });
 
+describe('expect: label map from a source column', () => {
+  const SRC = rss([
+    item(1, { title: 'Bolt M8', product_type: 'Hardware &gt; Fasteners' }),
+    item(2, { title: 'Sheet 0,5 mm', product_type: 'Metal &gt; Sheets' }),
+    item(3, { title: 'Strip', product_type: 'Metal &gt; Strips' }),
+    item(4, { title: 'Service', product_type: 'Services' }),
+    item(5, { title: 'Washer', product_type: 'Hardware &gt; Fasteners' }),
+  ]);
+  const GEN = rss([
+    item(1, { custom_label_0: 'fasteners' }),
+    item(2, { custom_label_0: 'strips' }),
+    item(3, { custom_label_0: 'strips' }),
+    item(4, { custom_label_0: 'other' }),
+    item(5, { custom_label_0: '' }),
+  ]);
+  const spec = { custom_label_0: { expect: { from: 'product_type', leaf: true, map: { Fasteners: 'fasteners', Sheets: 'coils_sheets', Strips: 'strips' } } } };
+  const res = () => checkFeeds(parseXml(GEN), parseXml(SRC), { fields: ['custom_label_0'], spec });
+  test('wrong_label counts outputs that differ from the mapped label of the row', () => {
+    const { metrics, rows } = res();
+    assert.equal(metrics.fields.custom_label_0.checks.wrong_label, 1);
+    const r2 = rows.find((r) => r.id === '2');
+    assert.ok(r2.failures.some((f) => f.check === 'wrong_label' && f.detail === 'strips → coils_sheets'));
+  });
+  test('unmapped source values are counted as unmapped_label, not as wrong labels', () => {
+    const { metrics, rows } = res();
+    assert.equal(metrics.fields.custom_label_0.checks.unmapped_label, 1);
+    assert.deepEqual(metrics.fields.custom_label_0.unmapped_values, { Services: 1 });
+    assert.ok(!rows.find((r) => r.id === '4').failures.length, 'an unmapped value is a gap in the map, not a defect of the row');
+  });
+  test('an empty output counts as empty only', () => {
+    const { metrics } = res();
+    assert.equal(metrics.fields.custom_label_0.checks.empty, 1);
+  });
+  test('leaf: false compares the whole source value', () => {
+    const s = { custom_label_0: { expect: { from: 'product_type', map: { 'Metal > Strips': 'strips' } } } };
+    const { metrics } = checkFeeds(parseXml(GEN), parseXml(SRC), { fields: ['custom_label_0'], spec: s });
+    assert.equal(metrics.fields.custom_label_0.checks.wrong_label, 0);
+    assert.equal(metrics.fields.custom_label_0.checks.unmapped_label, 3);
+  });
+  test('without expect both checks are not applicable (null)', () => {
+    const { metrics } = checkFeeds(parseXml(GEN), parseXml(SRC), { fields: ['custom_label_0'], spec: {} });
+    assert.equal(metrics.fields.custom_label_0.checks.wrong_label, null);
+    assert.equal(metrics.fields.custom_label_0.checks.unmapped_label, null);
+  });
+});
+
 describe('mapsFromProducts (MCP optimized_feeds_products fallback)', () => {
   test('builds generated and source maps from {products:[{id, original, optimized}]}', () => {
     const { generated, source } = mapsFromProducts({ total: 1, products: [{ id: 'x1', original: { Title: 'A 10', product_highlight: ['p', 'q'] }, optimized: { title: 'A' } }] });
@@ -191,6 +239,26 @@ describe('CLI', () => {
     assert.match(r.stdout, /title/);
     assert.match(r.stdout, /product_highlight/);
     for (const text of ['Steel', 'Bolt', 'Roof', 'Bracket', 'Кронштейн', 'Galvanized']) assert.ok(!r.stdout.includes(text), `stdout leaked "${text}"`);
+  });
+  test('flagged.md lists every flagged row (sample.md stays capped at 15); stdout unchanged', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cf-'));
+    const n = 20;
+    const ids = Array.from({ length: n }, (_, i) => i + 1);
+    writeFileSync(join(dir, 'src.xml'), rss(ids.map((i) => item(i, { title: `Bolt M8 size ${i + 10}` }))));
+    writeFileSync(join(dir, 'gen.xml'), rss(ids.map((i) => item(i, { title: i === 20 ? `Bolt M8 size 30` : 'Bolt M8' }))));
+    const out = join(dir, 'out');
+    const r = spawnSync('node', [script, '--generated', join(dir, 'gen.xml'), '--source', join(dir, 'src.xml'), '--fields', 'title', '--out', out], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const flagged = readFileSync(join(out, 'flagged.md'), 'utf8');
+    const sample = readFileSync(join(out, 'sample.md'), 'utf8');
+    assert.equal((flagged.match(/^## /gm) ?? []).length, 19);
+    assert.equal((sample.match(/^## /gm) ?? []).length, 15);
+    assert.match(flagged, /^# check-feed flagged: 19 of 20 rows/);
+    assert.match(flagged, /- source title: Bolt M8 size 29/);
+    assert.match(flagged, /- title: Bolt/);
+    assert.match(flagged, /numbers_dropped/);
+    assert.ok(!r.stdout.includes('Bolt'), 'stdout leaked product text');
+    assert.deepEqual(r.stdout.split('\n').filter((l) => /^\w+: /.test(l) && !l.startsWith('rows:')).map((l) => l.split(':')[0]), ['metrics', 'sample']);
   });
   test('default --out goes under the OS temp dir', () => {
     const dir = setup();

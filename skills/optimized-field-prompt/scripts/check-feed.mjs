@@ -16,7 +16,10 @@
 // --out: default <os temp>/feededify-check-feed/<timestamp>. Never point it into a git-tracked folder.
 //
 // spec.json: { "<field>": { maxChars?, minChars?, allowed?: string[], list?: {min?, max?, itemMax?},
-//                           keepTitleNumbers?: boolean } }
+//                           keepTitleNumbers?: boolean,
+//                           expect?: { from: "<source column>", leaf?: boolean, map: { "<source value>": "<label>" } } } }
+//   expect: the label each row must get, looked up by that row's source value (from = column name, e.g.
+//   product_type; leaf = use only the last "a > b > c" segment). Build the map from the audit's classifier table.
 //
 // Rows: generated items joined to source items by id. Only joined rows are checked.
 // Checks (per field, counted per row; null in metrics = not applicable):
@@ -41,17 +44,24 @@
 //                     words elsewhere such as ДОСТАВКА or IN STOCK are ignored). Skipped when the source
 //                     text itself (URLs excluded) uses the lowercase form. Not applied to `allowed` fields.
 //   x_between_digits  latin x / cyrillic х between digits ("20x5") instead of ×
+//   wrong_label       (expect only) filled output differs from the mapped label for the row's source value
+//   unmapped_label    (expect only) the row's source value has no entry in expect.map. Counted, and listed with
+//                     counts in metrics.fields.<f>.unmapped_values, but not a row defect: extend the map
 //
 // Output: <out>/metrics.json, <out>/sample.md (worst 15 rows: id, source title, every field's output,
-// failed checks). stdout: a per-field count table and the two paths only, no product text.
+// failed checks), <out>/flagged.md (EVERY flagged row, same layout, worst first; read it, not only the
+// sample, to count real defects). stdout: a per-field count table and the metrics/sample paths only, no
+// product text; flagged.md sits next to sample.md. All three files hold client data: keep --out in temp.
 import { readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadFeed } from './feed.mjs';
 
-export const CHECKS = ['empty', 'too_long', 'too_short', 'not_allowed', 'bad_list', 'russian_letters', 'null_literal', 'numbers_dropped', 'numbers_invented', 'case_changed', 'x_between_digits'];
-const SHORT = { empty: 'empty', too_long: 'long', too_short: 'short', not_allowed: 'allow', bad_list: 'list', russian_letters: 'ru', null_literal: 'null', numbers_dropped: 'num-', numbers_invented: 'num+', case_changed: 'case', x_between_digits: 'x' };
+export const CHECKS = ['empty', 'too_long', 'too_short', 'not_allowed', 'bad_list', 'russian_letters', 'null_literal', 'numbers_dropped', 'numbers_invented', 'case_changed', 'x_between_digits', 'wrong_label', 'unmapped_label'];
+const SHORT = { empty: 'empty', too_long: 'long', too_short: 'short', not_allowed: 'allow', bad_list: 'list', russian_letters: 'ru', null_literal: 'null', numbers_dropped: 'num-', numbers_invented: 'num+', case_changed: 'case', x_between_digits: 'x', wrong_label: 'label', unmapped_label: 'unmap' };
+// Counted in metrics but not a defect of the row: the expect map has no entry for the source value.
+const NOT_A_DEFECT = new Set(['unmapped_label']);
 const TITLE_NUMBER_FIELDS = new Set(['title', 'short_title', 'size']);
 const WORST = 15;
 
@@ -168,7 +178,20 @@ function checkValue(field, raw, src, spec, language) {
   const changed = fieldCodes(src, field, st).filter((c) => !exact.has(c) && lower.has(c.toLowerCase())).map((c) => `${c}→${lower.get(c.toLowerCase())}`);
   if (changed.length && !spec.allowed) fail('case_changed', changed.join(', '));
   if (XDIG.test(text)) fail('x_between_digits');
+  if (spec.expect) {
+    const key = expectKey(src, spec.expect);
+    const want = Object.hasOwn(spec.expect.map ?? {}, key) ? spec.expect.map[key] : undefined;
+    if (want === undefined) fail('unmapped_label', key);
+    else if (value !== String(want).trim()) fail('wrong_label', `${value} → ${want}`);
+  }
   return f;
+}
+
+/** The source value an expect map is keyed by: column `from`, its last "a > b > c" segment when leaf is set. */
+function expectKey(src, { from, leaf } = {}) {
+  let v = String(src[normKey(String(from ?? ''))] ?? '').trim();
+  if (v.startsWith('[')) v = listItems(v)[0] ?? '';
+  return leaf ? v.split('>').pop().trim() : v;
 }
 
 const keepTitleNumbers = (field, spec) => spec.keepTitleNumbers ?? TITLE_NUMBER_FIELDS.has(field);
@@ -182,6 +205,7 @@ function applicable(check, field, spec, language) {
     case 'russian_letters': return language === 'uk';
     case 'numbers_dropped': return keepTitleNumbers(field, spec);
     case 'case_changed': return !spec.allowed; // the allowed set already fixes exact values
+    case 'wrong_label': case 'unmapped_label': return !!spec.expect;
     default: return true;
   }
 }
@@ -207,6 +231,7 @@ export function checkFeeds(generated, source, { fields, spec = {}, language, max
   for (const f of fields) {
     const s = spec[f] ?? {};
     metrics.fields[f] = { rows: ids.length, filled: 0, fill_rate: 0, checks: Object.fromEntries(CHECKS.map((c) => [c, applicable(c, f, s, language) ? 0 : null])) };
+    if (s.expect) metrics.fields[f].unmapped_values = {};
   }
   const rows = [];
   for (const id of ids) {
@@ -217,7 +242,8 @@ export function checkFeeds(generated, source, { fields, spec = {}, language, max
       const m = metrics.fields[f];
       if (!fl.some((x) => x.check === 'empty')) m.filled++;
       for (const x of fl) m.checks[x.check]++;
-      failures.push(...fl);
+      for (const x of fl.filter((y) => y.check === 'unmapped_label')) m.unmapped_values[x.detail] = (m.unmapped_values[x.detail] ?? 0) + 1;
+      failures.push(...fl.filter((x) => !NOT_A_DEFECT.has(x.check)));
     }
     rows.push({ id, sourceTitle: src.title ?? '', outputs: Object.fromEntries(fields.map((f) => [f, g[f] ?? ''])), failures });
   }
@@ -225,13 +251,12 @@ export function checkFeeds(generated, source, { fields, spec = {}, language, max
     const m = metrics.fields[f];
     m.fill_rate = m.rows ? Math.round((m.filled / m.rows) * 1000) / 1000 : 0;
   }
-  const worst = rows
+  const flagged = rows
     .map((r, i) => ({ r, i }))
     .filter(({ r }) => r.failures.length)
     .sort((a, b) => b.r.failures.length - a.r.failures.length || a.i - b.i)
-    .slice(0, WORST)
     .map(({ r }) => r);
-  return { metrics, worst, rows };
+  return { metrics, worst: flagged.slice(0, WORST), flagged, rows };
 }
 
 const strVal = (v) => (v == null ? '' : Array.isArray(v) ? JSON.stringify(v.map((x) => String(x ?? ''))) : typeof v === 'object' ? JSON.stringify(v) : String(v));
@@ -254,10 +279,12 @@ export function mapsFromProducts(data) {
 
 const cell = (s) => String(s).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 
-export function renderSample({ metrics, worst }, fields) {
-  const lines = [`# check-feed sample: worst ${worst.length} of ${metrics.rows} rows`, ''];
-  if (!worst.length) lines.push('No failed checks.');
-  for (const r of worst) {
+/** sample.md (worst rows) by default; with all = true, flagged.md (every flagged row, same layout). */
+export function renderSample({ metrics, worst, flagged }, fields, { all = false } = {}) {
+  const list = all ? flagged : worst;
+  const lines = [all ? `# check-feed flagged: ${list.length} of ${metrics.rows} rows` : `# check-feed sample: worst ${list.length} of ${metrics.rows} rows`, ''];
+  if (!list.length) lines.push('No failed checks.');
+  for (const r of list) {
     lines.push(`## ${r.id} (${r.failures.length} failed)`, '', `- source title: ${cell(r.sourceTitle)}`);
     for (const f of fields) lines.push(`- ${f}: ${cell(r.outputs[f])}`);
     lines.push('', 'Failed:');
@@ -311,6 +338,7 @@ async function main(argv) {
   const m = result.metrics;
   writeFileSync(join(out, 'metrics.json'), JSON.stringify(m, null, 2) + '\n');
   writeFileSync(join(out, 'sample.md'), renderSample(result, fields));
+  writeFileSync(join(out, 'flagged.md'), renderSample(result, fields, { all: true }));
   if (m.rows && !m.rows_with_source_title && fields.some((f) => m.fields[f].checks.numbers_dropped !== null))
     console.error('warning: no source row has a "title" value, so numbers_dropped had nothing to compare (not evaluated).');
   console.log(`rows: ${m.rows}${m.sampled_from ? ` (sampled from ${m.sampled_from})` : ''}; unmatched: generated ${m.unmatched_generated}, source ${m.unmatched_source}`);

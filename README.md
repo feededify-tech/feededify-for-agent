@@ -58,7 +58,8 @@ skills folder, side by side (the audit uses the other skill's scripts):
 ### claude.ai
 
 Zip each of the two skill folders and upload them in Settings → Customize → Skills. Without the admin MCP the
-skills run in manual mode.
+skills run in manual mode. Upload **both** skills: if the audit cannot reach `../optimized-field-prompt/scripts`
+there, it does the profile and lint checks by hand.
 
 ### Optional: Node 18+
 
@@ -88,16 +89,19 @@ Needs the admin MCP. The agent tunes prompts **on the feed you name** by measuri
 4. Each iteration: drafts or revises the prompts, lints them, saves them, runs the feed, waits for the run,
    then checks the generated values against the source (limits, allowed values, facts dropped or invented)
    and reads the flagged rows.
-5. Stops when no real defect is left, after iteration 3, or when a run fails.
+5. Stops when no real defect is left, after iteration 3, when the cost budget is reached, when a run fails,
+   or when a save would touch a field outside the agreed list (it then saves nothing and asks).
 
 Safety:
 - Only the fields you named are changed. All other prompts are kept exactly as they are, and the agent
   stops and asks if someone edits one of your fields meanwhile.
 - Saving regenerates the edited fields **for every product** in the feed. Cost is shown first; the real
   cost per run is reported from the run history.
-- If an iteration gets worse than the previous one, the agent **restores the best version** (the original
-  prompts included) and stops. Restoring changes the saved prompts only: the generated feed keeps the
-  worse output until the next run, and the agent says so.
+- The agent tracks the best version **of each field** separately (the original prompts included); a newer
+  version counts as better only when it fixes at least 2 more rows. If an iteration gets worse, and at the
+  end, it saves each field's best version in one save and stops. That save changes the saved prompts only:
+  fields whose prompt changed keep the worse output until the next run. The agent says which ones and
+  offers one re-run with its cost.
 - The final report lists each field's final prompt, its iteration, the total cost and what still fails.
 
 ## How to use `optimized-field-prompt` (manual mode)

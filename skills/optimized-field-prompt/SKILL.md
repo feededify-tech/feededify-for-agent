@@ -113,8 +113,12 @@ calls, file names and the report template: [references/auto-tune.md](references/
    node <skill-dir>/scripts/check-feed.mjs --generated <generated_feed_url> --source <source_feed_url> \
      --fields title,size --spec <tmp>/spec.json --language <feed language>
    ```
-   Source feed behind auth: save `optimized_feeds_products` pages to a temp JSON and pass `--products`.
-   stdout is a count table only; product rows go to `metrics.json` and `sample.md` in a temp folder.
+   Source feed behind auth: never page the whole feed through the agent; save one fixed sample,
+   `optimized_feeds_products {skip: 0, count: 200}` (the same rows every iteration), to a temp JSON, pass
+   `--products`, and say the metrics cover a 200-row sample.
+   stdout is a count table only; product rows go to `metrics.json`, `sample.md` (worst 15) and `flagged.md`
+   (every flagged row) in a temp folder. Classifier fields: add `expect` (source column → label map) to
+   the spec to count `wrong_label`.
 4. **Iterate, at most 3 times:** draft or revise the prompts → `lint.mjs --language <feed language>` →
    **safe save**: fetch the map again with `optimized_feeds_get`, **merge** the agreed fields into it with
    `scripts/prompt-map.mjs`, `optimized_feeds_set_prompts` (preview → confirm; a token lives 5 min, so
@@ -123,14 +127,19 @@ calls, file names and the report template: [references/auto-tune.md](references/
    `optimized_feeds_start` if the feed is inactive → poll `optimized_feeds_history` after
    `node <skill-dir>/scripts/wait-run.mjs 60` until a run with a later `created_at` than the noted one
    (server time, never your clock) has a final status (20 min timeout) → `check-feed.mjs` → read
-   `sample.md` and judge which flags are real invented / dropped facts → stop early when no blocking
-   issue remains.
-5. **Stop rules:** a run failed or `batches_failed > 0`; metrics worse than the previous iteration
-   (restore the best prompts with one more safe save, no run unless the user asks, and tell the user the
-   live feed keeps the worse output until the next run); budget spent; a save would touch any field
-   outside the agreed list (never do that).
-6. **Report** after each iteration: prompt diff summary, metrics table, cost from history. At the end:
-   final prompts, total cost, what still fails.
+   `flagged.md` (all flagged rows, not only the sample) and count real defect rows per field → stop early
+   when no blocking issue remains.
+5. **Per-field best.** Track the best version of **each** agreed field separately (fewest real defect
+   rows for that field, baseline included). A newer version replaces a field's best only when it has at
+   least 2 fewer defect rows: each version gets one run on a high-variance model, so 1 row is noise.
+6. **Stop rules:** a run failed or `batches_failed > 0`; metrics worse than the previous iteration; budget
+   reached; a save would touch any field outside the agreed list (never do that). On a regression, and at
+   the end when the live prompts are not the best set, do **one** safe save of `{field: best version}` for
+   all agreed fields, merged into a freshly fetched map. No run unless the user asks: fields whose prompt
+   this save did not change keep their live output (hash unchanged); the others regenerate on the next run,
+   so offer one force_update and state its cost.
+7. **Report** after each iteration: prompt diff summary, metrics table, cost from history. At the end:
+   final prompts and the iteration each one came from, total cost, what still fails.
 
 **Merge rule.** `optimized_feeds_set_prompts` **replaces the whole map**: a saved map without an untouched
 field deletes that field's prompt. Always save `mergeMap(fresh, changes)`: the map fetched right before the

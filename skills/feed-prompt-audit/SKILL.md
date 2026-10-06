@@ -12,7 +12,9 @@ auto-tune mode, which asks its own "yes".
 
 **Needs both skills.** The scripts live in the `optimized-field-prompt` skill folder
 (`../optimized-field-prompt/scripts/` from this file), and the drafts follow its anatomy and recipes.
-The `feededify` plugin installs both. In a manual install, copy both folders side by side.
+The `feededify` plugin installs both. In a manual install, copy both folders side by side. If the
+scripts cannot be reached or run (no Node, or a claude.ai upload without the sibling folder), say so and
+apply the same checks by hand on a sample of the rows, using profile-signals.md as the checklist.
 
 Read before recommending:
 - [references/profile-signals.md](references/profile-signals.md): what each profile signal means for each field prompt.
@@ -40,9 +42,12 @@ node <dir>/../optimized-field-prompt/scripts/profile-feed.mjs <source_feed_url> 
 `<dir>` is this skill's folder. Columns named differently from `title` / `description` / `product_type` /
 `brand`: pass `--title-col`, `--description-col`, `--type-col`, `--brand-col`.
 
-**Source needs auth** (`requires_auth: true`, or the download fails with 401/403): with the MCP, page
-`optimized_feeds_products {optimized_feed_id, skip, count: 1000}` (up to ~3 000 rows is enough), write the
-responses as a JSON array to a temp file and run `profile-feed.mjs --products <file> --columns ...`.
+**Source needs auth** (`requires_auth: true`, or the download fails with 401/403): with the MCP, never page
+the whole feed through the agent (every page passes through your context). Take one sample of at most
+1 000 rows: `optimized_feeds_products {optimized_feed_id, skip: 0, count: 1000}` (one call; `count: 200` is
+enough for a small feed), write the response to a temp JSON file and run
+`profile-feed.mjs --products <file> --columns ...`. Say in the reply that the profile covers that sample,
+not the whole feed (a `product_type` distribution from the first rows can miss categories).
 Without the MCP, ask the admin for an export file. On this path the rows hold only the attributes
 already selected, so the profile cannot show columns the feed has but the model does not see: skip the
 "add a column to Source attributes" check, or ask the admin which other columns the source has.
