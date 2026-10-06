@@ -2,8 +2,8 @@
   "name": "feededify",
   "description": "Agent skills for Feededify admins: audit an optimized feed to decide which fields to optimize, and write, lint and auto-tune field prompts for Prompt Studio.",
   "author": { "name": "Feededify" },
-  "homepage": "https://github.com/feededify-tech/feededify-skills",
-  "repository": "https://github.com/feededify-tech/feededify-skills",
+  "homepage": "https://github.com/feededify-tech/feededify-for-agent",
+  "repository": "https://github.com/feededify-tech/feededify-for-agent",
   "license": "MIT",
   "keywords": ["feededify", "product-feed", "google-shopping", "prompts"]
 }

@@ -16,15 +16,15 @@
 **Claude Code.** Виконай дві команди всередині Claude Code і перезапусти його:
 
 ```text
-/plugin marketplace add feededify-tech/feededify-skills
-/plugin install feededify@feededify-skills
+/plugin marketplace add feededify-tech/feededify-for-agent
+/plugin install feededify@feededify-for-agent
 ```
 
 Якщо перша команда падає з помилкою SSH, використай повну адресу:
-`/plugin marketplace add https://github.com/feededify-tech/feededify-skills.git`.
+`/plugin marketplace add https://github.com/feededify-tech/feededify-for-agent.git`.
 
 - **Перевірка:** спитай агента «які в тебе скіли feededify?». У відповіді мають бути `feededify:optimized-field-prompt` і `feededify:feed-prompt-audit`.
-- **Автооновлення:** `/plugin` → Marketplaces → `feededify-skills` → Enable auto-update.
+- **Автооновлення:** `/plugin` → Marketplaces → `feededify-for-agent` → Enable auto-update.
 
 **Codex.** Завантаж репо (Code → Download ZIP) і скопіюй **обидві** теки, `skills/optimized-field-prompt` і `skills/feed-prompt-audit`, поруч у `~/.agents/skills/` (у старіших версіях `~/.codex/skills/`). Аудит використовує скрипти другого скіла, тому одна тека не працюватиме.
 

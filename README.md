@@ -32,21 +32,21 @@ The plugin ships a `.mcp.json` that registers the `feededify-admin` MCP server
 Run inside Claude Code, then restart it:
 
 ```text
-/plugin marketplace add feededify-tech/feededify-skills
-/plugin install feededify@feededify-skills
+/plugin marketplace add feededify-tech/feededify-for-agent
+/plugin install feededify@feededify-for-agent
 ```
 
 If the first command fails with an SSH error, use the full URL:
-`/plugin marketplace add https://github.com/feededify-tech/feededify-skills.git`.
+`/plugin marketplace add https://github.com/feededify-tech/feededify-for-agent.git`.
 
 - **Check:** ask "which feededify skills do you have?" The answer includes `feededify:optimized-field-prompt`
   and `feededify:feed-prompt-audit`.
-- **Auto-update:** `/plugin` → **Marketplaces** → `feededify-skills` → **Enable auto-update**.
-  Manual update: `/plugin marketplace update feededify-skills`. New skills arrive with updates.
+- **Auto-update:** `/plugin` → **Marketplaces** → `feededify-for-agent` → **Enable auto-update**.
+  Manual update: `/plugin marketplace update feededify-for-agent`. New skills arrive with updates.
 
 ### Codex and other agents
 
-Get the repo (**Code → Download ZIP** on GitHub, or `git clone https://github.com/feededify-tech/feededify-skills.git`)
+Get the repo (**Code → Download ZIP** on GitHub, or `git clone https://github.com/feededify-tech/feededify-for-agent.git`)
 and copy **both** folders, `skills/optimized-field-prompt` and `skills/feed-prompt-audit`, into your agent's
 skills folder, side by side (the audit uses the other skill's scripts):
 
