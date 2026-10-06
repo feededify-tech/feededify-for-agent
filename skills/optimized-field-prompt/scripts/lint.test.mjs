@@ -74,5 +74,17 @@ describe('lintDraft', () => {
     assert.deepEqual(normalizeDraft({ title: spec }), { fields: { title: spec } });
     assert.deepEqual(normalizeDraft({ fields: { title: spec }, sourceColumns: ['a'] }), { fields: { title: spec }, sourceColumns: ['a'] });
   });
+  test('language line equal to the feed language is fine; different one warns', () => {
+    const p = text('Write in Ukrainian, translating the source. Max 150 characters. If empty return "".');
+    assert.deepEqual(codes({ language: 'uk', fields: { title: p } }), []);
+    has({ language: 'uk', fields: { title: text('Write in English. Max 150 characters. If empty return "".') } }, 'warning:title:language');
+    has({ fields: { title: p } }, 'warning:title:language'); // no feed language known: still warns
+  });
+  test('forced lowercase warns (breaks codes like DX51D)', () => {
+    has({ fields: { material: text('Main material, lowercase. Max 60 characters. If none return "".') } }, 'warning:material:forced-case');
+  });
+  test('"leave contradicted facts out" warns', () => {
+    has({ fields: { size: text('If two values contradict each other, leave that dimension out. Max 100 characters. If none return "".') } }, 'warning:size:drop-on-conflict');
+  });
   test('promo request warns', () => has({ fields: { title: text('Add "free shipping" and the price. Max 150 characters. If empty return empty.') } }, 'warning:title:promo'));
 });

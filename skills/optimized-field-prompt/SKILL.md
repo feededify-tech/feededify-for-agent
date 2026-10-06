@@ -42,8 +42,9 @@ and do not repeat customer names or shop domains back.
    until all examples pass.
 4. **Lint** (Node 18+, no install):
    ```bash
-   node <skill-dir>/scripts/lint.mjs draft.json --columns title,brand,description
+   node <skill-dir>/scripts/lint.mjs draft.json --columns title,brand,description --language uk
    ```
+   `--language` is the feed language; a prompt line naming that same language is then not warned about.
    `draft.json` is `{"<field>": {"type": "text", "prompt": "..."}}` (several fields allowed); write it
    to a temp folder. Errors must be fixed. Discuss each warning; keep one only on purpose (for example a
    per-field language that must differ from the feed). If Node is not available, apply the same checks
@@ -57,6 +58,8 @@ One imperative per line, in this order:
 
 1. Goal of the field (who reads it, where it shows).
 2. Columns by exact name, with priority.
+2b. Source of truth: the title is the authority for this product's own values; text about other
+   products is not a contradiction. Never "drop the fact if values conflict".
 3. Structure / order of the value.
 4. Hard limit in characters, words or items.
 5. Missing data: return `""` or a stated fallback. Never "null" or "N/A".

@@ -64,9 +64,16 @@ Max 100 characters each. Used for campaign segmentation, not shown to shoppers. 
 small fixed set, or bidding cannot group them.
 
 ```text
-Classify the product into exactly one of: "running", "outdoor", "casual", "other".
-Return the value only, lowercase, at most 100 characters. Use product_type and title. If the data is missing or unclear, return "other".
+Classify the product into exactly one label using the table below; every product_type value maps to exactly one label, there is no "first match" order.
+Return the label only, at most 100 characters. If product_type is empty or not in the table, return "other".
+product_type | label
+Running shoes | running
+Hiking boots | outdoor
+Sneakers | casual
 ```
+
+Build the table from the feed's actual `product_type` values (ask the admin for the distinct list). Do not
+write ordered "first match" rules: the model ignores the order.
 
 ## color
 
@@ -83,6 +90,7 @@ Max 200 characters.
 
 ```text
 The main material(s), e.g. "cotton" or "leather/rubber". Use material, then title and description.
+Keep codes and grades exactly as written (e.g. "DX51D", "AISI 304"); never change their case.
 At most 200 characters. If no material is stated, return "".
 ```
 
@@ -93,6 +101,13 @@ Max 100 characters. Keep the source notation exactly (`XL`, `42`, `10.5 US`).
 ```text
 The size exactly as written in the data. Never convert between size systems. If no size is stated, return "".
 ```
+
+Cover every value shape the feed has, with one example each:
+
+- Mixed units: write each dimension with its own unit, e.g. "20×0,6 мм, 5 м".
+- Threads: "M8×30", no unit added.
+- Kits: use the size of the main item.
+- The title is the authority for this product's own values. Text about other products (a description listing other sizes) is not a contradiction; do not drop the product's own value because of it.
 
 ## gender
 

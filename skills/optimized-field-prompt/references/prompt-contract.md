@@ -47,7 +47,7 @@ Example, new field:
 ```text
 Short material label for catalog-ad overlays.
 Use material; if empty, the material named in title or description.
-Return the main material only, in lowercase, without percentages (e.g. "cotton", "genuine leather").
+Return the main material only, without percentages (e.g. "cotton", "genuine leather"). Keep codes and grades exactly as written (e.g. "DX51D").
 At most 30 characters.
 If no material is stated anywhere, return "".
 ```
@@ -75,6 +75,11 @@ Example: "Acme Trail 3 men's running shoes, black, 42".
 | Columns that are not source attributes | The model never sees them. Add the column to the feed's source attributes first. |
 | "Check the product page" | Only `page_facts` exist, and only when the feed has a product link. |
 | No length limit | Nothing trims the value afterwards. |
+| "If two values contradict, leave the fact out" | Misfires: the model dropped a product's own thickness because the description listed other products' sizes. Say instead: the title is the authority for this product's own values; text about other products is not a contradiction. |
+| Format rule for one value shape only | Rules must cover every shape the data has: mixed units ("20×0,6 мм, 5 м"), threads ("M8×30", no unit), kits (use the main item's size). List each shape with an example. |
+| Forced lowercase / uppercase | Breaks codes and grades (`dx51d` for `DX51D`). Say: keep codes and grades exactly as written. |
+| Classifier field (`custom_label_N`) with ordered "first match" rules | The model ignores the order. Use one exclusive mapping table built from the feed's `product_type` values: each value maps to exactly one label. |
+| Source text in another language than the feed (e.g. Russian text in a `uk` feed) | The text stays untranslated. Say: write in the feed language, translating the source. Naming the feed language is then correct; the lint warns only when the named language differs from the feed language (`--language`). |
 
 ## Consequences of saving
 
