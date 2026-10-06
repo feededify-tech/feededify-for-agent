@@ -54,3 +54,7 @@ The linter needs only Node 18+:
 node skills/optimized-field-prompt/scripts/lint.mjs draft.json --columns title,brand,description
 node --test skills/optimized-field-prompt/scripts/
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
