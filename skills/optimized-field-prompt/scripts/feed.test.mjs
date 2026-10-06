@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadFeed, parseXml, parseCsv } from './feed.mjs';
+import { loadFeed, parseXml, parseCsv, DEFAULT_TIMEOUT_MS } from './feed.mjs';
 
 const RSS = `<?xml version="1.0"?>
 <rss xmlns:g="http://base.google.com/ns/1.0" version="2.0"><channel><title>Shop</title>
@@ -127,5 +127,58 @@ describe('loadFeed', () => {
     globalThis.fetch = async () => ({ ok: true, status: 200, headers: new Map([['content-length', String(201 * 1024 * 1024)]]), text: async () => '' });
     try { await assert.rejects(loadFeed('https://example.test/big', { type: 'xml' }), /200 MB/); }
     finally { globalThis.fetch = orig; }
+  });
+});
+
+describe('download timeout and encoding warning', () => {
+  const withFetch = async (fake, fn) => {
+    const orig = globalThis.fetch;
+    globalThis.fetch = fake;
+    try { return await fn(); } finally { globalThis.fetch = orig; }
+  };
+  const withStderr = async (fn) => {
+    const orig = console.error;
+    const lines = [];
+    console.error = (...a) => lines.push(a.join(' '));
+    try { await fn(); } finally { console.error = orig; }
+    return lines;
+  };
+  // A fetch that never answers until its signal aborts, like a stalled server. AbortSignal.timeout's timer
+  // is unref'd (a real socket keeps the process alive), so hold the event loop open with a ref'd timer.
+  const hanging = (url, opts) => new Promise((_, reject) => {
+    assert.ok(opts?.signal, 'fetch must get an abort signal');
+    const keepAlive = setTimeout(() => reject(new Error('signal never aborted')), 5000);
+    opts.signal.addEventListener('abort', () => { clearTimeout(keepAlive); reject(opts.signal.reason); });
+  });
+  test('fetch gets a timeout signal; a stalled download fails with a clear error', async () => {
+    await withFetch(hanging, () => assert.rejects(
+      loadFeed('https://example.test/slow.xml', { type: 'xml', timeoutMs: 50 }),
+      /timed out after 0\.05 s.*example\.test\/slow\.xml/,
+    ));
+  });
+  test('the default timeout is 120 s', async () => {
+    let signal;
+    await withFetch(async (url, opts) => { signal = opts?.signal; return { ok: true, status: 200, headers: new Map(), text: async () => ATOM }; },
+      () => loadFeed('https://example.test/feed.xml', { type: 'xml' }));
+    assert.ok(signal instanceof AbortSignal);
+    assert.equal(DEFAULT_TIMEOUT_MS, 120_000);
+  });
+  test('U+FFFD in the decoded text prints a non-UTF-8 warning on stderr', async () => {
+    const bad = ATOM.replace('Entry one', 'Entry �ne');
+    const lines = await withStderr(() => withFetch(async () => ({ ok: true, status: 200, headers: new Map(), text: async () => bad }),
+      () => loadFeed('https://example.test/feed.xml', { type: 'xml' })));
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /U\+FFFD/);
+    assert.match(lines[0], /UTF-8/);
+  });
+  test('a local file with invalid UTF-8 bytes warns too; clean text does not', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'feed-enc-'));
+    const f = join(dir, 'cp1251.csv');
+    writeFileSync(f, Buffer.concat([Buffer.from('id,title\n1,'), Buffer.from([0xcf, 0xf0, 0xe8]), Buffer.from('\n')]));
+    const warned = await withStderr(() => loadFeed(f, { type: 'csv' }));
+    assert.equal(warned.length, 1);
+    const clean = await withStderr(() => withFetch(async () => ({ ok: true, status: 200, headers: new Map(), text: async () => ATOM }),
+      () => loadFeed('https://example.test/feed.xml', { type: 'xml' })));
+    assert.deepEqual(clean, []);
   });
 });

@@ -1,5 +1,6 @@
 // Feed loader: fetch (http/https) or read (local path), parse RSS/Atom/CSV, return Map<id, record>.
-// Node 18+, no dependencies.
+// Node 18+, no dependencies. Downloads time out after 120 s (loadFeed option timeoutMs). Text is read as
+// UTF-8; a U+FFFD in it (non-UTF-8 feed) prints a warning on stderr.
 //
 // Record rules:
 //  - keys are lowercase, namespace prefix removed ("g:product_type" -> "product_type");
@@ -117,23 +118,42 @@ export function parseCsv(text, { csvSeparator = ',', idProp = 'id' } = {}) {
   return out;
 }
 
-async function readSource(urlOrPath) {
-  if (/^https?:\/\//i.test(urlOrPath)) {
-    const res = await fetch(urlOrPath);
+export const DEFAULT_TIMEOUT_MS = 120_000;
+
+async function download(url, timeoutMs) {
+  // The signal also covers reading the body: a server that stalls mid-download fails too.
+  const signal = AbortSignal.timeout(timeoutMs);
+  try {
+    const res = await fetch(url, { signal });
     if (!res.ok) throw new Error(`Feed download failed: HTTP ${res.status}`);
     const len = Number(res.headers.get('content-length'));
     if (len > MAX_BYTES) throw new Error(MAX_ERR);
     const text = await res.text();
     if (Buffer.byteLength(text) > MAX_BYTES) throw new Error(MAX_ERR);
     return text;
+  } catch (e) {
+    if (signal.aborted || e?.name === 'TimeoutError' || e?.name === 'AbortError')
+      throw new Error(`Feed download timed out after ${timeoutMs / 1000} s: ${url}. Retry, or download the feed and pass the file path.`);
+    throw e;
   }
-  if (statSync(urlOrPath).size > MAX_BYTES) throw new Error(MAX_ERR);
-  return readFileSync(urlOrPath, 'utf8');
 }
 
-/** Load a feed into Map<id, Record<string,string>>. */
-export async function loadFeed(urlOrPath, { type, itemPath, idProp = 'id', csvSeparator } = {}) {
+async function readSource(urlOrPath, timeoutMs) {
+  let text;
+  if (/^https?:\/\//i.test(urlOrPath)) text = await download(urlOrPath, timeoutMs);
+  else {
+    if (statSync(urlOrPath).size > MAX_BYTES) throw new Error(MAX_ERR);
+    text = readFileSync(urlOrPath, 'utf8');
+  }
+  // Text is decoded as UTF-8; bytes that are not valid UTF-8 (e.g. a windows-1251 feed) become U+FFFD.
+  if (text.includes('�'))
+    console.error(`warning: ${urlOrPath} contains U+FFFD replacement characters: the feed is probably not UTF-8 (or already broken), so some text is lost and checks on it are unreliable.`);
+  return text;
+}
+
+/** Load a feed into Map<id, Record<string,string>>. timeoutMs bounds an http(s) download (default 120 s). */
+export async function loadFeed(urlOrPath, { type, itemPath, idProp = 'id', csvSeparator, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   if (type !== 'xml' && type !== 'csv') throw new Error(`loadFeed: type must be 'xml' or 'csv', got ${type}`);
-  const text = await readSource(urlOrPath);
+  const text = await readSource(urlOrPath, timeoutMs);
   return type === 'csv' ? parseCsv(text, { csvSeparator, idProp }) : parseXml(text, { itemPath, idProp });
 }
