@@ -16,7 +16,7 @@
 //   current.json: the map itself, or optimized_feeds_get output (its optimized_field_prompts key is used).
 //   Writes the merged map to --out (or stdout when --out is missing) and prints which keys were
 //   kept / changed / added / removed. Prompt text is printed only when there is no --out.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -72,7 +72,14 @@ function main(argv) {
   return 0;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// True when this file is the entry script, also when run through a symlink or junction
+// (Node resolves the module to its real path; argv[1] keeps the link path).
+function isMain() {
+  try { return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); }
+  catch { return false; }
+}
+
+if (isMain()) {
   try { process.exit(main(process.argv.slice(2))); }
   catch (e) { console.error(e.message); process.exit(1); }
 }

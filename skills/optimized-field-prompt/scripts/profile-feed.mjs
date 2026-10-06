@@ -40,7 +40,7 @@
 //
 // Output: <out>/profile.json, <out>/sample.md (2 rows per product_type, ≤30 rows, values cut to 600 chars,
 // rows with signals first). stdout: counts only, no product text.
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -535,6 +535,13 @@ async function main(argv) {
   return 0;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// True when this file is the entry script, also when run through a symlink or junction
+// (Node resolves the module to its real path; argv[1] keeps the link path).
+function isMain() {
+  try { return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); }
+  catch { return false; }
+}
+
+if (isMain()) {
   main(process.argv.slice(2)).then((c) => process.exit(c), (e) => { console.error(e.message); process.exit(1); });
 }

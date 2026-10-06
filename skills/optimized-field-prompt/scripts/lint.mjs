@@ -9,7 +9,7 @@
 // draft.json: the field map ({"title": {"type": "text", "prompt": "..."}}) or
 // {"fields": <map>, "sourceColumns": [...]}. Exits 1 when any error is found.
 // Errors mirror what the admin rejects on save; warnings are known prompt mistakes.
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const MAX_PROMPT_CHARS = 20_000;
@@ -110,4 +110,11 @@ function main(argv) {
   return findings.some((f) => f.level === 'error') ? 1 : 0;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) process.exit(main(process.argv.slice(2)));
+// True when this file is the entry script, also when run through a symlink or junction
+// (Node resolves the module to its real path; argv[1] keeps the link path).
+function isMain() {
+  try { return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); }
+  catch { return false; }
+}
+
+if (isMain()) process.exit(main(process.argv.slice(2)));
