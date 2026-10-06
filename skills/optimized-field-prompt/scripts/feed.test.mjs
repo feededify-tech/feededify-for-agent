@@ -65,6 +65,29 @@ describe('parseXml', () => {
   });
 });
 
+describe('fix round 1', () => {
+  test('g: tag wins over bare tag of the same name (Atom id)', () => {
+    const m = parseXml('<feed><entry><id>urn:x</id><g:id>E1</g:id><link href="a"/><g:link>b</g:link></entry></feed>');
+    assert.deepEqual([...m.keys()], ['E1']);
+    assert.equal(m.get('E1').id, 'E1');
+    assert.equal(m.get('E1').link, 'b');
+  });
+  test('g:title wins over title in RSS', () => {
+    const m = parseXml('<rss><channel><item><g:id>1</g:id><title>bare</title><g:title>pref</g:title></item></channel></rss>');
+    assert.equal(m.get('1').title, 'pref');
+  });
+  test('idProp is normalised (g:id, ID)', () => {
+    const x = '<rss><channel><item><g:id>7</g:id></item></channel></rss>';
+    assert.deepEqual([...parseXml(x, { idProp: 'g:id' }).keys()], ['7']);
+    assert.deepEqual([...parseXml(x, { idProp: 'ID' }).keys()], ['7']);
+    assert.deepEqual([...parseCsv('id,t\n5,a\n', { idProp: 'ID' }).keys()], ['5']);
+  });
+  test('item-group and self-closing item are not items', () => {
+    const x = '<channel><item><g:id>1</g:id></item><item-group><g:id>X</g:id></item-group><item/><item><g:id>2</g:id></item></channel>';
+    assert.deepEqual([...parseXml(x).keys()], ['1', '2']);
+  });
+});
+
 describe('parseCsv', () => {
   test('quoted commas, quotes, newlines; lowercase headers', () => {
     const m = parseCsv(CSV);

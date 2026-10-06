@@ -7,7 +7,10 @@
 //  - a tag repeated inside one item is stored as a JSON array string, e.g. '["a","b"]';
 //  - nested elements are flattened as parent_child ("<g:shipping><g:country>" -> "shipping_country");
 //  - a self-closing tag with an href attribute (Atom <link href="..."/>) yields the href, otherwise "";
-//  - items without an id value are skipped.
+//  - items without an id value are skipped;
+//  - when a bare tag and a g:-prefixed tag map to the same key (Atom <id> + <g:id>, <title> + <g:title>),
+//    the g: one wins and the bare one is dropped;
+//  - repeated tags are JSON array strings: consumers must JSON.parse defensively (a value may start with '[').
 import { readFileSync, statSync } from 'node:fs';
 
 export const MAX_BYTES = 200 * 1024 * 1024;
@@ -31,7 +34,9 @@ const TOKEN = /<!\[CDATA\[([\s\S]*?)\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<(\/?)(
 
 function parseItem(inner) {
   const vals = new Map();
-  const add = (k, v) => { const a = vals.get(k); if (a) a.push(v); else vals.set(k, [v]); };
+  const bare = new Map();
+  const add = (k, v, g) => { const t = g ? vals : bare; const a = t.get(k); if (a) a.push(v); else t.set(k, [v]); };
+  const isG = (raw) => raw.toLowerCase().startsWith('g:');
   const stack = []; // {name, text, hasChild}
   const path = (name) => [...stack.map((s) => s.name), name].join('_');
   TOKEN.lastIndex = 0;
@@ -44,16 +49,17 @@ function parseItem(inner) {
     const name = normName(rawName);
     if (close) {
       const top = stack.pop();
-      if (top && !top.hasChild) add(path(top.name), top.text.trim());
+      if (top && !top.hasChild) add(path(top.name), top.text.trim(), top.g);
     } else if (selfClose) {
       if (stack.length) stack[stack.length - 1].hasChild = true;
       const href = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/.exec(attrs);
-      add(path(name), href ? decodeEntities(href[1] ?? href[2]) : '');
+      add(path(name), href ? decodeEntities(href[1] ?? href[2]) : '', isG(rawName));
     } else {
       if (stack.length) stack[stack.length - 1].hasChild = true;
-      stack.push({ name, text: '', hasChild: false });
+      stack.push({ name, text: '', hasChild: false, g: isG(rawName) });
     }
   }
+  for (const [k, a] of bare) if (!vals.has(k)) vals.set(k, a);
   const rec = {};
   for (const [k, a] of vals) rec[k] = a.length === 1 ? a[0] : JSON.stringify(a);
   return rec;
@@ -61,12 +67,14 @@ function parseItem(inner) {
 
 /** Parse RSS/Atom text. itemPath like "rss->channel->item": only the last segment is used as the item tag. */
 export function parseXml(xml, { itemPath, idProp = 'id' } = {}) {
+  idProp = normName(idProp.trim());
   const tag = itemPath ? itemPath.split('->').pop().trim() : '(?:item|entry)';
   const esc = itemPath ? tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : tag;
-  const re = new RegExp(`<((?:[\\w.-]+:)?${esc})\\b(?:[^>"']|"[^"]*"|'[^']*')*?>([\\s\\S]*?)</\\1\\s*>`, 'g');
+  const re = new RegExp(`<((?:[\\w.-]+:)?${esc})(?=[\\s/>])(?:[^>"']|"[^"]*"|'[^']*')*?(?:/>|>([\\s\\S]*?)</\\1\\s*>)`, 'g');
   const out = new Map();
   let m;
   while ((m = re.exec(xml))) {
+    if (m[2] === undefined) continue; // self-closing <item/>
     const rec = parseItem(m[2]);
     const id = rec[idProp];
     if (id === undefined || id === '') continue;
@@ -77,6 +85,7 @@ export function parseXml(xml, { itemPath, idProp = 'id' } = {}) {
 
 /** Parse CSV (RFC 4180 quoting, header row, lowercased headers). */
 export function parseCsv(text, { csvSeparator = ',', idProp = 'id' } = {}) {
+  idProp = normName(idProp.trim());
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   const rows = [];
   let row = [], field = '', q = false;
