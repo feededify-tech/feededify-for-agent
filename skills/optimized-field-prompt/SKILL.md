@@ -116,18 +116,24 @@ calls, file names and the report template: [references/auto-tune.md](references/
    Source feed behind auth: save `optimized_feeds_products` pages to a temp JSON and pass `--products`.
    stdout is a count table only; product rows go to `metrics.json` and `sample.md` in a temp folder.
 4. **Iterate, at most 3 times:** draft or revise the prompts → `lint.mjs --language <feed language>` →
-   **merge** into the current map with `scripts/prompt-map.mjs` → `optimized_feeds_set_prompts`
-   (preview → confirm) → `optimized_feeds_force_update` (preview → confirm), or `optimized_feeds_start`
-   if the feed is inactive → poll `optimized_feeds_history` after `node <skill-dir>/scripts/wait-run.mjs 60`
-   until a completed run newer than the save (20 min timeout) → `check-feed.mjs` → read `sample.md` and
-   judge which flags are real invented / dropped facts → stop early when no blocking issue remains.
+   **safe save**: fetch the map again with `optimized_feeds_get`, **merge** the agreed fields into it with
+   `scripts/prompt-map.mjs`, `optimized_feeds_set_prompts` (preview → confirm; a token lives 5 min, so
+   re-run the preview if the review took longer) → note the newest run's `created_at` in
+   `optimized_feeds_history` → `optimized_feeds_force_update` (preview → confirm), or
+   `optimized_feeds_start` if the feed is inactive → poll `optimized_feeds_history` after
+   `node <skill-dir>/scripts/wait-run.mjs 60` until a run with a later `created_at` than the noted one
+   (server time, never your clock) has a final status (20 min timeout) → `check-feed.mjs` → read
+   `sample.md` and judge which flags are real invented / dropped facts → stop early when no blocking
+   issue remains.
 5. **Stop rules:** a run failed or `batches_failed > 0`; metrics worse than the previous iteration
-   (restore the best prompts with one more save, no run unless the user asks); budget spent; a save
-   would touch any field outside the agreed list (never do that).
+   (restore the best prompts with one more safe save, no run unless the user asks, and tell the user the
+   live feed keeps the worse output until the next run); budget spent; a save would touch any field
+   outside the agreed list (never do that).
 6. **Report** after each iteration: prompt diff summary, metrics table, cost from history. At the end:
    final prompts, total cost, what still fails.
 
 **Merge rule.** `optimized_feeds_set_prompts` **replaces the whole map**: a saved map without an untouched
-field deletes that field's prompt. Always save `mergeMap(current, changes)`: the current map with the
-agreed fields replaced or added, every other key kept as is. A change of `null` removes a field; use it
-only when the user asked to delete that field.
+field deletes that field's prompt. Always save `mergeMap(fresh, changes)`: the map fetched right before the
+save (an admin may have edited the live feed meanwhile) with the agreed fields replaced or added, every
+other key kept as is. A change of `null` removes a field; use it only when the user asked to delete that
+field, or when restoring the baseline removes an agreed field that was new.

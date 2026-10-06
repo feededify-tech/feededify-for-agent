@@ -28,14 +28,18 @@
 //                     (list value = repeated tags / JSON array, else comma-separated)
 //   russian_letters   ы э ё ъ in the output (only with --language uk)
 //   null_literal      the word "null" or "N/A" anywhere, or a whole value / list item "none" or "undefined"
-//   numbers_dropped   a number in the SOURCE TITLE missing from the output. Only for fields with
+//   numbers_dropped   a number in the SOURCE TITLE missing from the output (stderr warns when no row
+//                     has a source title: the check then has nothing to compare). Only for fields with
 //                     keepTitleNumbers (default on for title, short_title, size). Numbers are
 //                     \d+([.,]\d+)? normalised (comma -> dot, 0,90 == 0.9); digits glued to letters on
 //                     both sides (DX51D) are part of a code and skipped here (case_changed covers codes)
 //   numbers_invented  a number in the output found in no source column of that row
-//   case_changed      a source code token (no lowercase letters, >= 2 chars, and >= 2 capitals or a
-//                     capital + digit: DX51D, AISI, EPDM, M8, RAL) appears in the output in other case
-//                     (dx51d, Epdm) while the original form does not. Not applied to fields with `allowed`
+//   case_changed      a source code token appears in the output in other case (dx51d, Epdm) while the
+//                     original form does not. Code = no lowercase letters and either a capital + a digit
+//                     (DX51D, M8; taken from any source column) or 2-6 Latin capitals only (AISI, EPDM,
+//                     RAL; taken from the source TITLE and the same-named source column only, so all-caps
+//                     words elsewhere such as ДОСТАВКА or IN STOCK are ignored). Skipped when the source
+//                     text itself (URLs excluded) uses the lowercase form. Not applied to `allowed` fields.
 //   x_between_digits  latin x / cyrillic х between digits ("20x5") instead of ×
 //
 // Output: <out>/metrics.json, <out>/sample.md (worst 15 rows: id, source title, every field's output,
@@ -74,14 +78,14 @@ export function numberTokens(s, { skipCodes = false } = {}) {
 
 const WORD = /[\p{L}\d]+(?:-[\p{L}\d]+)*/gu;
 
-/** Set of code-like tokens: no lowercase, length >= 2, >= 2 capitals or a capital + a digit. */
+/** Set of code-like tokens: no lowercase letters and either a capital + a digit (DX51D, M8, AISI-304)
+ *  or 2-6 Latin capitals only (AISI, EPDM, RAL). All-caps Cyrillic words and long Latin caps are words, not codes. */
 export function codeTokens(s) {
   const out = new Set();
   if (!s) return out;
   for (const [w] of String(s).matchAll(WORD)) {
     if (w.length < 2 || /\p{Ll}/u.test(w)) continue;
-    const caps = (w.match(/\p{Lu}/gu) || []).length;
-    if (caps >= 2 || (caps >= 1 && /\d/.test(w))) out.add(w);
+    if ((/\p{Lu}/u.test(w) && /\d/.test(w)) || /^[A-Z]{2,6}$/.test(w)) out.add(w);
   }
   return out;
 }
@@ -100,16 +104,31 @@ const NULLISH = /(?:^|[^\p{L}\d/])(null|n\/a)(?=$|[^\p{L}\d/])/iu; // "none" / "
 const RU = /[ыэёъЫЭЁЪ]/;
 const XDIG = /\d\s*[xXхХ]\s*\d/;
 
-// Numbers and code tokens of a whole source row, computed once per row (not once per field).
+// Numbers and words of a whole source row, computed once per row (not once per field).
 const srcCache = new WeakMap();
 function srcTokens(src) {
   let t = srcCache.get(src);
   if (!t) {
     const vals = Object.values(src);
-    t = { nums: new Set(vals.flatMap((v) => [...numberTokens(v)])), codes: new Set(vals.flatMap((v) => [...codeTokens(v)])) };
+    t = {
+      nums: new Set(vals.flatMap((v) => [...numberTokens(v)])),
+      // words of the source text, URLs removed (a lowercase slug is not the source writing the code lowercase)
+      words: new Set(vals.flatMap((v) => wordsOf(String(v).replace(URL_RE, ' ')))),
+      // codes with a digit (DX51D, M8) are specific enough to take from any column
+      digitCodes: new Set(vals.flatMap((v) => [...codeTokens(v)].filter((c) => /\d/.test(c)))),
+    };
     srcCache.set(src, t);
   }
   return t;
+}
+const URL_RE = /\b(?:https?:\/\/|www\.)\S+/gi;
+
+// Codes a field must keep as written: codes with a digit from any source column; letters-only codes
+// (AISI, EPDM) from the source title and the same-named column only, so all-caps words elsewhere
+// (IN STOCK, FREE) do not count. Minus codes whose lowercase form the source itself uses.
+function fieldCodes(src, field, t) {
+  const codes = new Set([...t.digitCodes, ...codeTokens(src.title ?? ''), ...(field !== 'title' ? codeTokens(src[field] ?? '') : [])]);
+  return [...codes].filter((c) => !t.words.has(c.toLowerCase()));
 }
 
 function checkValue(field, raw, src, spec, language) {
@@ -139,13 +158,14 @@ function checkValue(field, raw, src, spec, language) {
     const lost = [...numberTokens(src.title ?? '', { skipCodes: true })].filter((n) => !outNums.has(n));
     if (lost.length) fail('numbers_dropped', lost.join(', '));
   }
-  const { nums: srcNums, codes: srcCodes } = srcTokens(src);
+  const st = srcTokens(src);
+  const srcNums = st.nums;
   const added = [...numberTokens(text)].filter((n) => !srcNums.has(n));
   if (added.length) fail('numbers_invented', added.join(', '));
   const outWords = wordsOf(text);
   const exact = new Set(outWords);
   const lower = new Map(outWords.map((w) => [w.toLowerCase(), w]));
-  const changed = [...srcCodes].filter((c) => !exact.has(c) && lower.has(c.toLowerCase())).map((c) => `${c}→${lower.get(c.toLowerCase())}`);
+  const changed = fieldCodes(src, field, st).filter((c) => !exact.has(c) && lower.has(c.toLowerCase())).map((c) => `${c}→${lower.get(c.toLowerCase())}`);
   if (changed.length && !spec.allowed) fail('case_changed', changed.join(', '));
   if (XDIG.test(text)) fail('x_between_digits');
   return f;
@@ -181,6 +201,7 @@ export function checkFeeds(generated, source, { fields, spec = {}, language, max
     sampled_from: ids.length < joined ? joined : null,
     unmatched_generated: generated.size - joined,
     unmatched_source: [...source.keys()].filter((id) => !generated.has(id)).length,
+    rows_with_source_title: ids.filter((id) => (source.get(id).title ?? '').trim() !== '').length,
     fields: {},
   };
   for (const f of fields) {
@@ -290,6 +311,8 @@ async function main(argv) {
   const m = result.metrics;
   writeFileSync(join(out, 'metrics.json'), JSON.stringify(m, null, 2) + '\n');
   writeFileSync(join(out, 'sample.md'), renderSample(result, fields));
+  if (m.rows && !m.rows_with_source_title && fields.some((f) => m.fields[f].checks.numbers_dropped !== null))
+    console.error('warning: no source row has a "title" value, so numbers_dropped had nothing to compare (not evaluated).');
   console.log(`rows: ${m.rows}${m.sampled_from ? ` (sampled from ${m.sampled_from})` : ''}; unmatched: generated ${m.unmatched_generated}, source ${m.unmatched_source}`);
   console.log(renderTable(m));
   console.log(`metrics: ${join(out, 'metrics.json')}`);

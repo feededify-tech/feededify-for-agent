@@ -64,6 +64,43 @@ describe('token helpers', () => {
   test('codeTokens finds uppercase / alphanumeric codes only', () => {
     assert.deepEqual([...codeTokens('Steel DX51D, EPDM seal M8 RAL 9005 Bolt mm AISI-304 A')].sort(), ['AISI-304', 'DX51D', 'EPDM', 'M8', 'RAL']);
   });
+  test('codeTokens: a digit, or 2-6 Latin capitals; no all-caps Cyrillic words or long Latin caps', () => {
+    assert.deepEqual([...codeTokens('ДОСТАВКА ПО УКРАЇНІ FREESHIP М10 ART')].sort(), ['ART', 'М10']);
+  });
+});
+
+describe('case_changed sources', () => {
+  const src = (fields) => parseXml(rss([item(1, fields)]));
+  const gen = (fields) => parseXml(rss([item(1, fields)]));
+  const cc = (s, g, field) => checkFeeds(gen(g), src(s), { fields: [field], spec: {} }).rows[0].failures.filter((f) => f.check === 'case_changed');
+  test('marketing caps word in another column is not flagged; DX51D -> dx51d still is', () => {
+    const f = cc({ title: 'Лист DX51D', description: 'ДОСТАВКА ПО УКРАЇНІ. FREE' }, { title: 'Лист dx51d доставка по україні free' }, 'title');
+    assert.equal(f.length, 1);
+    assert.equal(f[0].detail, 'DX51D→dx51d');
+  });
+  test('AISI -> aisi is flagged when AISI is in the source title', () => {
+    const f = cc({ title: 'Bolt AISI 304' }, { material: 'aisi 304 steel' }, 'material');
+    assert.equal(f.length, 1);
+    assert.match(f[0].detail, /AISI→aisi/);
+  });
+  test('letters-only codes come from the title and the same-named source column only', () => {
+    assert.equal(cc({ title: 'Seal', description: 'EPDM rubber' }, { title: 'seal epdm' }, 'title').length, 0);
+    assert.equal(cc({ title: 'Seal', material: 'EPDM' }, { material: 'epdm' }, 'material').length, 1);
+    assert.equal(cc({ title: 'Seal', availability: 'IN STOCK' }, { title: 'seal in stock' }, 'title').length, 0);
+  });
+  test('codes with a digit count from any source column (grade only in the description)', () => {
+    const f = cc({ title: 'Sheet 0,5 mm', description: 'Steel grade DX51D, zinc.' }, { material: 'galvanized steel dx51d' }, 'material');
+    assert.equal(f.length, 1);
+    assert.equal(f[0].detail, 'DX51D→dx51d');
+  });
+  test('a code whose lowercase form is also in the source text is not flagged; URLs do not count', () => {
+    assert.equal(cc({ title: 'EPDM seal', description: 'made of epdm rubber' }, { title: 'epdm seal' }, 'title').length, 0);
+    assert.equal(cc({ title: 'EPDM seal', link: 'https://shop.test/epdm/seal?q=epdm' }, { title: 'epdm seal' }, 'title').length, 1);
+  });
+  test('metrics.rows_with_source_title counts rows whose source has a title', () => {
+    const { metrics } = checkFeeds(gen({ title: 'a' }), src({ name: 'a' }), { fields: ['title'] });
+    assert.equal(metrics.rows_with_source_title, 0);
+  });
 });
 
 describe('checkFeeds', () => {
@@ -171,6 +208,14 @@ describe('CLI', () => {
     const r = spawnSync('node', [script, '--products', join(dir, 'products.json'), '--fields', 'title', '--out', out], { encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
     assert.equal(JSON.parse(readFileSync(join(out, 'metrics.json'), 'utf8')).fields.title.checks.case_changed, 1);
+  });
+  test('warns on stderr when no source row has a title', () => {
+    const dir = setup();
+    writeFileSync(join(dir, 'products.json'), JSON.stringify({ products: [{ id: 1, original: { name: 'Bolt 8' }, optimized: { title: 'Bolt' } }] }));
+    const r = spawnSync('node', [script, '--products', join(dir, 'products.json'), '--fields', 'title', '--out', join(dir, 'o3')], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /title/);
+    assert.match(r.stderr, /numbers_dropped/);
   });
   test('usage error exits 2', () => {
     const r = spawnSync('node', [script, '--fields', 'title'], { encoding: 'utf8' });
