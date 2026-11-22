@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "feededify-admin": {
-      "type": "http",
-      "url": "https://mcp.feededify.app/mcp"
-    }
-  }
-}
