@@ -13,17 +13,15 @@ Agent skills for Feededify admins, packaged as the Claude Code plugin **`feededi
 
 The two skills work together: the audit uses the other skill's scripts and prompt rules.
 
-## Connect the Feededify admin MCP
+## The Feededify admin MCP (retired)
 
-The plugin ships a `.mcp.json` that registers the `feededify-admin` MCP server
-(`https://mcp.feededify.app/mcp`). It is installed together with the plugin.
+The `feededify-admin` MCP server (`https://mcp.feededify.app/mcp`) served the first version of Feededify
+and was shut down on 2026-11-21. The plugin no longer registers it. If you added it by hand, remove it
+(`claude mcp remove feededify-admin`); otherwise every session reports a 502 for it.
 
-- **First use:** Claude Code opens a browser; sign in with your Feededify admin account (OAuth). If it does
-  not start by itself, run `/mcp` and authenticate `feededify-admin`.
-- **Without the MCP,** both skills still work in manual mode: you give the agent a source feed URL (or an
-  export file) and paste the prompts into Prompt Studio yourself. Auto-tune needs the MCP.
-- **Codex and other agents:** add the MCP server by hand with the URL `https://mcp.feededify.app/mcp`
-  (HTTP transport) in your agent's MCP settings.
+Both skills work in manual mode: you give the agent a source feed URL (or an export file) and paste the
+prompts into Prompt Studio yourself. Auto-tune needs the admin MCP and is not available until a
+replacement exists.
 
 ## Install
 
@@ -79,7 +77,7 @@ samples in a temp folder.
 
 ## Auto-tune
 
-Needs the admin MCP. The agent tunes prompts **on the feed you name** by measuring real output:
+Not available at the moment: it needs the admin MCP, which was retired (see above). The agent tunes prompts **on the feed you name** by measuring real output:
 
 1. Reads the feed, its run history and the current prompts (read only).
 2. Shows a plan: the fields it will change, their current prompts, up to 3 iterations, and a cost
